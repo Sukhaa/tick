@@ -15,6 +15,10 @@ export interface Annotation {
   color: string;
   text: string;
   alignment: 'left' | 'center' | 'right';
+  labelPosition?: {
+    x: number;
+    y: number;
+  };
 }
 
 export interface ImageData {

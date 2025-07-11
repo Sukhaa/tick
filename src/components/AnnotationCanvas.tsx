@@ -18,6 +18,7 @@ interface AnnotationCanvasProps {
   connectorStyle?: 'solid' | 'dashed' | 'dotted';
   connectorThickness?: number;
   showLabelNumbers?: boolean;
+  svgRef?: React.RefObject<SVGSVGElement | null>;
 }
 
 interface Point {
@@ -41,6 +42,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   connectorStyle = 'dashed',
   connectorThickness = 2,
   showLabelNumbers = false,
+  svgRef: externalSvgRef,
 }) => {
   console.log('AnnotationCanvas props:', { imageUrl, imageWidth, imageHeight });
   const [drawing, setDrawing] = useState(false);
@@ -48,7 +50,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const [end, setEnd] = useState<Point | null>(null);
   const [dragOffset, setDragOffset] = useState<Point | null>(null);
   const [resizing, setResizing] = useState<{ id: string; corner: string } | null>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
+  const internalSvgRef = useRef<SVGSVGElement>(null);
+  const svgRef = externalSvgRef || internalSvgRef;
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState<string>('');
   const [inputPos, setInputPos] = useState<{ x: number; y: number; width?: number; height?: number } | null>(null);
@@ -57,6 +60,72 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const labelTextRefs = useRef({});
   // Add a ref for the container div
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // --- Dragging state for shapes and labels ---
+  const [dragging, setDragging] = useState<{ id: string; type: 'shape' | 'label'; offset: { x: number; y: number } } | null>(null);
+
+  // Mouse down on shape border to start dragging
+  const handleShapeMouseDown = (e: React.MouseEvent, ann: Annotation) => {
+    if (tool !== 'pointer' || resizing || editingLabelId) return;
+    e.stopPropagation();
+    const svgCoords = getSvgCoords(e);
+    setDragging({
+      id: ann.id,
+      type: 'shape',
+      offset: {
+        x: svgCoords.x - ann.position.x,
+        y: svgCoords.y - ann.position.y,
+      },
+    });
+    onSelectAnnotation(ann.id);
+  };
+
+  // Mouse down on label text to start dragging label
+  const handleLabelMouseDown = (e: React.MouseEvent, ann: Annotation, labelTextX: number, labelTextY: number) => {
+    if (tool !== 'pointer' || resizing || editingLabelId) return;
+    e.stopPropagation();
+    const svgCoords = getSvgCoords(e);
+    setDragging({
+      id: ann.id,
+      type: 'label',
+      offset: {
+        x: svgCoords.x - labelTextX,
+        y: svgCoords.y - labelTextY,
+      },
+    });
+    onSelectAnnotation(ann.id);
+  };
+
+  // Mouse move to drag shape or label
+  const handleSvgMouseMove = (e: React.MouseEvent) => {
+    if (!dragging) return handleMouseMove(e);
+    const svgCoords = getSvgCoords(e);
+    if (dragging.type === 'shape') {
+      onUpdateAnnotation(dragging.id, {
+        position: {
+          x: svgCoords.x - dragging.offset.x,
+          y: svgCoords.y - dragging.offset.y,
+        },
+      });
+    } else if (dragging.type === 'label') {
+      // Store label position in annotation (add labelPosition if not present)
+      const ann = annotations.find(a => a.id === dragging.id);
+      if (ann) {
+        onUpdateAnnotation(dragging.id, {
+          labelPosition: {
+            x: svgCoords.x - dragging.offset.x,
+            y: svgCoords.y - dragging.offset.y,
+          },
+        });
+      }
+    }
+  };
+
+  // Mouse up to end dragging
+  const handleSvgMouseUp = (e: React.MouseEvent) => {
+    if (dragging) setDragging(null);
+    handleMouseUp(e);
+  };
 
   // Convert mouse event to SVG coordinates (responsive-safe)
   const getSvgCoords = (e: React.MouseEvent) => {
@@ -298,13 +367,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         />
       );
     }
-    if (tool === 'text') {
-      return (
-        <text x={end.x} y={end.y} fill={color} fontSize={18} alignmentBaseline="middle">
-          Text
-        </text>
-      );
-    }
+
     return null;
   };
 
@@ -414,12 +477,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     const minSpacing = boxHeight + 16; // Add extra padding
     let leftIndex = 0;
     let rightIndex = 0;
-    // Dynamic sizing for labels based on image size
-    const minBadgeRadius = 20;
-    const maxBadgeRadius = 40;
-    const badgeRadius = Math.max(minBadgeRadius, Math.min(maxBadgeRadius, Math.round(imageWidth * 0.045)));
-    const badgeFontSize = Math.max(18, Math.min(32, Math.round(imageWidth * 0.025)));
-    const labelFontSize = Math.max(18, Math.min(28, Math.round(imageWidth * 0.022)));
+    // badgeRadius and badgeFontSize are already declared above
+    // labelFontSize is already declared above in the margin calculation section
     const sorted = [...annotations].sort((a, b) => getAnnotationCenter(a).y - getAnnotationCenter(b).y);
     // Track how many left/right connectors we've placed so far
     let leftConnectorIndex = 0;
@@ -444,29 +503,65 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       const badgeStart = getBadgeCenter(ann, labelBadgeX, labelBadgeY);
       // Determine connector index for this side
       let connectorIndex = 0;
+      let connectorsOnThisSide = 0;
       if (isLeft) {
         connectorIndex = leftConnectorIndex++;
+        connectorsOnThisSide = leftConnectorIndex;
       } else {
         connectorIndex = rightConnectorIndex++;
+        connectorsOnThisSide = rightConnectorIndex;
       }
-      // Stagger the midway x for each connector on the same side
-      const staggerAmount = 32; // px between bends
-      let midwayX = (badgeStart.x + labelBadgeX) / 2;
+      // Improved: Distribute elbows evenly within a defined spread
+      const elbowSpread = 80; // px, adjust for your design
+      const elbowCenter = (badgeStart.x + labelBadgeX) / 2;
+      const elbowMin = elbowCenter - elbowSpread / 2;
+      const elbowMax = elbowCenter + elbowSpread / 2;
+      let midwayX = elbowCenter;
+      if (connectorsOnThisSide > 1) {
+        midwayX = elbowMin + (connectorIndex * (elbowSpread / (connectorsOnThisSide - 1)));
+      }
+      // Calculate safe distance for label text from image edge
+      const labelPaddingFromEdge = 12; // px
+      const baseLabelMargin = 48; // or 64 for more space
+      const labelMargin = Math.max(baseLabelMargin, labelFontSize * 2.5);
+      let labelTextX, labelTextAnchor;
+      // Add extra buffer to keep label text further from the image
       if (isLeft) {
-        midwayX -= connectorIndex * staggerAmount;
+        // Left labels: always outside the image, at buffer from canvas edge
+        labelTextX = labelBuffer;
+        labelTextAnchor = 'start';
       } else {
-        midwayX += connectorIndex * staggerAmount;
+        // Right labels: always outside the image, at buffer from right canvas edge
+        labelTextX = svgWidth - labelBuffer;
+        labelTextAnchor = 'end';
       }
-      // Path: shape edge -> midwayX (horizontal) -> midwayX,labelY (vertical) -> label badge (horizontal)
-      const path = [
-        `M${badgeStart.x},${badgeStart.y}`,
-        `L${midwayX},${badgeStart.y}`,
-        `L${midwayX},${labelBadgeY}`,
-        `L${labelBadgeX},${labelBadgeY}`
-      ].join(' ');
+      const labelTextY = labelBadgeY + 8; // matches text y
+      // Use quadratic Bezier curves for true curved elbows at both bends
+      const midwayY = labelTextY; // elbow at the y of the label
+      // Use a single cubic Bezier for a smooth S-curve
+      const controlOffset = 40; // adjust for curve softness
+      let path;
+      const verticalDistance = Math.abs(badgeStart.y - labelTextY);
+      const bendThreshold = 40; // px, adjust as needed
+      const curveRadius = Math.min(32, verticalDistance / 2);
+      if (verticalDistance < bendThreshold) {
+        // Two horizontal lines: annotation to midwayX, then midwayX to label
+        path = [
+          `M${badgeStart.x},${badgeStart.y}`,
+          `L${midwayX},${badgeStart.y}`,
+          `L${labelTextX},${labelTextY}`
+        ].join(' ');
+      } else {
+        // Horizontal, smooth vertical curve, horizontal
+        path = [
+          `M${badgeStart.x},${badgeStart.y}`,
+          `L${midwayX},${badgeStart.y}`,
+          `C${midwayX},${badgeStart.y + curveRadius} ${midwayX},${labelTextY - curveRadius} ${midwayX},${labelTextY}`,
+          `L${labelTextX},${labelTextY}`
+        ].join(' ');
+      }
       const isSelected = ann.id === selectedId;
       const isEditing = ann.id === editingLabelId;
-      const extraPadding = isLeft ? 64 : 96; // Adjusted for right-side labels
       return (
         <g key={ann.id + '-label-group'}>
           {/* Connector */}
@@ -480,7 +575,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
               connectorStyle === 'dashed' ? '8 6' :
               connectorStyle === 'dotted' ? '2 6' : '0'
             }
-            markerEnd={`url(#${isSelected ? 'arrowhead-selected' : 'arrowhead'})`}
+            // Removed markerEnd for no arrowhead
           />
           {/* Label badge */}
           {showLabelNumbers && (
@@ -510,15 +605,16 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
           {/* Label text */}
           {!isEditing && (
             <text
-              ref={el => { if (el) labelTextRefs.current[ann.id] = el; }}
-              x={isLeft ? labelBadgeX - extraPadding : labelBadgeX + extraPadding}
-              y={labelBadgeY + 8}
-              textAnchor={isLeft ? 'end' : 'start'}
+              ref={el => { labelTextRefs.current[ann.id] = el; }}
+              x={labelTextX}
+              y={labelTextY}
+              textAnchor={labelTextAnchor}
               fill="#222"
               fontSize={labelFontSize}
               fontWeight={isSelected ? 'bold' : 'normal'}
               alignmentBaseline="middle"
-              style={{ cursor: 'pointer', userSelect: 'none', fontFamily: 'Inter, Segoe UI, Helvetica Neue, Arial, sans-serif' }}
+              style={{ cursor: tool === 'pointer' ? 'move' : 'pointer', userSelect: 'none', fontFamily: 'Inter, Segoe UI, Helvetica Neue, Arial, sans-serif' }}
+              onMouseDown={e => handleLabelMouseDown(e, ann, labelBadgeX, labelBadgeY)}
               onClick={e => {
                 onSelectAnnotation(ann.id);
                 // Get bounding rect of label text
@@ -535,11 +631,21 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
                 handleLabelClick(ann, labelBadgeX, labelBadgeY);
               }}
             >
-              {(ann.text || 'Add note...').split('\n').map((line, i) => (
-                <tspan key={i} x={isLeft ? labelBadgeX - extraPadding : labelBadgeX + extraPadding} dy={i === 0 ? 0 : labelFontSize * 1.2}>
-                  {line || '\u00A0'}
-                </tspan>
-              ))}
+              {(() => {
+                // Split text into lines, each with max 6 words
+                const maxWordsPerLine = 6;
+                const text = ann.text || 'Add note...';
+                const words = text.split(/\s+/);
+                const lines: string[] = [];
+                for (let i = 0; i < words.length; i += maxWordsPerLine) {
+                  lines.push(words.slice(i, i + maxWordsPerLine).join(' '));
+                }
+                return lines.map((line: string, i: number) => (
+                  <tspan key={i} x={labelTextX} dy={i === 0 ? 0 : labelFontSize * 1.2}>
+                    {line || '\u00A0'}
+                  </tspan>
+                ));
+              })()}
             </text>
           )}
         </g>
@@ -615,7 +721,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
             stroke={isSelected ? '#f59e42' : ann.color}
             strokeWidth={isSelected ? 4 : 2}
             style={{ cursor: tool === 'pointer' ? 'move' : 'default' }}
-            onMouseDown={tool === 'pointer' ? (e) => { e.stopPropagation(); onSelectAnnotation(ann.id); } : undefined}
+            onMouseDown={e => handleShapeMouseDown(e, ann)}
           />
         );
       } else if (ann.type === 'circle') {
@@ -630,7 +736,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
             stroke={isSelected ? '#f59e42' : ann.color}
             strokeWidth={isSelected ? 4 : 2}
             style={{ cursor: tool === 'pointer' ? 'move' : 'default' }}
-            onMouseDown={tool === 'pointer' ? (e) => { e.stopPropagation(); onSelectAnnotation(ann.id); } : undefined}
+            onMouseDown={e => handleShapeMouseDown(e, ann)}
           />
         );
       } else if (ann.type === 'solid-circle') {
@@ -645,72 +751,89 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
             stroke={isSelected ? '#f59e42' : ann.color}
             strokeWidth={isSelected ? 2 : 1}
             style={{ cursor: tool === 'pointer' ? 'move' : 'default' }}
-            onMouseDown={tool === 'pointer' ? (e) => { e.stopPropagation(); onSelectAnnotation(ann.id); } : undefined}
+            onMouseDown={e => handleShapeMouseDown(e, ann)}
           />
         );
       }
       if (!shape) return null;
-      // Render simple solid circle at annotation center
-      const badge = (
-        <circle
-          key={ann.id + '-badge'}
-          cx={badgeX}
-          cy={badgeY}
-          r={8}
-          fill={isSelected ? '#2563eb' : '#fff'}
-          stroke={isSelected ? '#2563eb' : '#888'}
-          strokeWidth={2}
-          style={{ cursor: 'pointer' }}
-          onMouseDown={tool === 'pointer' ? (e) => { e.stopPropagation(); onSelectAnnotation(ann.id); } : undefined}
-        />
-      );
       return (
         <g key={ann.id + '-group'}>
           {shape}
-          {badge}
           {renderResizeHandles(ann, isSelected)}
         </g>
       );
     }).filter(Boolean);
 
-  // Set fixed top margin and dynamic bottom margin
-  const topMargin = expandCanvas ? 220 : 0;
+  // --- Begin dynamic margin calculation ---
+  // Calculate the vertical range needed for left and right labels
+  const allLabelYs = annotations.map(ann => {
+    const center = ann.position.y + (ann.size?.height || 0) / 2;
+    return center;
+  });
+  const minLabelY = allLabelYs.length ? Math.min(...allLabelYs) : 0;
+  const maxLabelY = allLabelYs.length ? Math.max(...allLabelYs) : imageHeight;
+  
+  // Add padding above the highest label and below the lowest label
+  const labelPadding = 40; // px, increased for better spacing
+  const topMargin = Math.max(labelPadding, imageHeight / 30);
+  const bottomMargin = Math.max(labelPadding, imageHeight / 15, maxLabelY - imageHeight / 2 + labelPadding);
 
-  // --- Begin dynamic right margin calculation ---
-  const minSideMargin = expandCanvas ? Math.max(220, imageWidth * 0.4) : 0;
-  const leftExtraPadding = 96; // was 64
-  const rightExtraPadding = 128; // was 96
-  const badgeRadius = 20;
-  const rightEdgeBuffer = 48; // extra space between label text and SVG edge
-
-  // Estimate max right label text width (SVG text, so use a rough multiplier)
-  const rightLabelTexts = annotations
-    .filter(ann => (ann.position.x + (ann.size?.width || 0) / 2) >= imageWidth / 2)
-    .map(ann => ann.text || 'Add note...');
-  const maxRightLabelLength = rightLabelTexts.length > 0 ? Math.max(...rightLabelTexts.map(t => t.length)) : 0;
-  const approxCharWidth = 12; // px per character (SVG, sans-serif, fontSize=20)
-  const maxRightLabelTextWidth = maxRightLabelLength * approxCharWidth;
-  const rightLabelMargin = rightLabelTexts.length > 0 ? badgeRadius + rightExtraPadding + maxRightLabelTextWidth + rightEdgeBuffer : 0;
-
-  // Use the larger of minSideMargin or rightLabelMargin for the right side
-  const leftSideMargin = minSideMargin;
-  const rightSideMargin = Math.max(minSideMargin, rightLabelMargin);
-
-  const minSpacing = boxHeight + 16;
-  // Count left/right labels
-  const leftLabels = annotations.filter(ann => (ann.position.x + (ann.size?.width || 0) / 2) < imageWidth / 2);
-  const rightLabels = annotations.length - leftLabels.length;
-  const neededLabelHeight = Math.max(leftLabels.length, rightLabels) * minSpacing;
-  const bottomMargin = expandCanvas ? Math.max(minSideMargin, neededLabelHeight) : 0;
-  const svgWidth = imageWidth + leftSideMargin + rightSideMargin;
-  const svgHeight = imageHeight + topMargin + bottomMargin;
-  const imageX = leftSideMargin;
-  const imageY = topMargin;
-
-  // Compute labelFontSize for use in the input style
+  // --- Begin dynamic side margin calculation ---
+  // Estimate the width of the longest label line on each side after word wrapping
+  const maxWordsPerLine = 6; // Define once at component level
+  const getLabelWrappedLines = (text: string): string[] => {
+    const words = text.split(/\s+/);
+    const lines: string[] = [];
+    for (let i = 0; i < words.length; i += maxWordsPerLine) {
+      lines.push(words.slice(i, i + maxWordsPerLine).join(' '));
+    }
+    return lines;
+  };
+  const getMaxLineLength = (annList: Annotation[]): number => {
+    let maxLen = 0;
+    for (const ann of annList) {
+      const lines = getLabelWrappedLines(ann.text || 'Add note...');
+      for (const line of lines) {
+        maxLen = Math.max(maxLen, line.length);
+      }
+    }
+    return maxLen;
+  };
+  // More accurate character width calculation based on font size
   const minLabelFontSize = 18;
   const maxLabelFontSize = 28;
   const labelFontSize = Math.max(minLabelFontSize, Math.min(maxLabelFontSize, Math.round(imageWidth * 0.022)));
+  const approxCharWidth = labelFontSize * 0.6; // More accurate: ~0.6x font size for most fonts
+  const labelBuffer = 40; // px, buffer between label and image
+  // Left labels
+  const leftLabels = annotations.filter(ann => {
+    const center = ann.position.x + (ann.size?.width || 0) / 2;
+    return center < imageWidth / 2;
+  });
+  const maxLeftLineLen = getMaxLineLength(leftLabels);
+  const maxLeftLabelWidth = maxLeftLineLen * approxCharWidth;
+  const leftMargin = leftLabels.length > 0 ? maxLeftLabelWidth + labelBuffer : 0;
+  // Right labels
+  const rightLabels = annotations.filter(ann => {
+    const center = ann.position.x + (ann.size?.width || 0) / 2;
+    return center >= imageWidth / 2;
+  });
+  const maxRightLineLen = getMaxLineLength(rightLabels);
+  const maxRightLabelWidth = maxRightLineLen * approxCharWidth;
+  const rightMargin = rightLabels.length > 0 ? maxRightLabelWidth + labelBuffer : 0;
+
+  const svgWidth = leftMargin + imageWidth + rightMargin;
+  const svgHeight = imageHeight + topMargin + bottomMargin;
+  const imageX = leftMargin;
+  const imageY = topMargin;
+
+  // Dynamic sizing for labels based on image size
+  const minBadgeRadius = 20;
+  const maxBadgeRadius = 40;
+  const badgeRadius = Math.max(minBadgeRadius, Math.min(maxBadgeRadius, Math.round(imageWidth * 0.045)));
+  const badgeFontSize = Math.max(18, Math.min(32, Math.round(imageWidth * 0.025)));
+
+  // labelFontSize is already declared above in the margin calculation section
 
   if (!imageWidth || !imageHeight || imageWidth < 2 || imageHeight < 2) {
     return <div className="w-full h-64 flex items-center justify-center text-gray-400">No image loaded</div>;
@@ -751,8 +874,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         className="cursor-crosshair"
         style={{ height: 'auto', maxWidth: '100%', display: 'block' }}
         onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
+        onMouseMove={handleSvgMouseMove}
+        onMouseUp={handleSvgMouseUp}
       >
         {/* Arrowhead marker definitions */}
         <defs>

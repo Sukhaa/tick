@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAnnotations } from './hooks/useAnnotations';
 import { ImageData } from './types/annotation';
 import { Toolbar, ToolType } from './components/Toolbar';
 import { AnnotationCanvas } from './components/AnnotationCanvas';
+import { exportAnnotatedImage, getExportFilename } from './utils/exportUtils';
 import './App.css';
 
 // --- IndexedDB utility for image blobs ---
@@ -73,6 +74,7 @@ function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [connectorStyle, setConnectorStyle] = useState<'solid' | 'dashed' | 'dotted'>('dashed');
   const [connectorThickness, setConnectorThickness] = useState<number>(2);
+  const svgRef = useRef<SVGSVGElement>(null);
   // Remove activeTab state
 
   // On mount, if savedImageMeta exists, load blob from IndexedDB and create object URL
@@ -157,8 +159,28 @@ function App() {
   // Pass selection state to canvas
   const handleSelectAnnotation = (id: string | null) => setSelectedId(id);
 
+  // Handle export
+  const handleExport = async () => {
+    if (!svgRef.current || !currentImage) {
+      alert('Please load an image first');
+      return;
+    }
+
+    try {
+      const filename = getExportFilename(currentImage.fileName, 'png');
+      await exportAnnotatedImage(svgRef.current, {
+        format: 'png',
+        quality: 0.9,
+        filename
+      });
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('Export failed. Please try again.');
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50" style={{ fontFamily: 'Inter, Segoe UI, Helvetica Neue, Arial, sans-serif' }}>
+    <div className="min-h-screen bg-gray-50 flex justify-center items-center" style={{ minHeight: '100vh' }}>
       {/* Floating Toolbar at bottom, only if image is loaded */}
       {currentImage && (
         <Toolbar
@@ -176,18 +198,19 @@ function App() {
           onConnectorThicknessChange={setConnectorThickness}
           onUndo={undo}
           onClearAll={clearAnnotations}
+          onExport={handleExport}
         />
       )}
-      <div className="main-content mx-auto px-4 py-8 flex flex-col items-center">
-        <header className="mb-8 text-center">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
+      <div className="main-content mx-auto px-8 py-12 flex flex-col items-center w-full max-w-5xl">
+        <header className="mb-10 text-center">
+          <h1 className="text-5xl font-extrabold text-gray-900 mb-3 tracking-tight" style={{ letterSpacing: '-0.01em' }}>
             Image Annotation Software
           </h1>
-          <p className="text-gray-600">
+          <p className="text-lg text-gray-600 font-medium">
             Effortlessly annotate images with clear, structured explanations
           </p>
         </header>
-        <div className="w-full max-w-4xl flex flex-col items-center space-y-6 mt-24">
+        <div className="w-full max-w-4xl flex flex-col items-center space-y-8 mt-12">
           {imageLoading && (
             <div className="flex flex-col items-center justify-center py-8">
               <div className="w-12 h-12 border-4 border-blue-300 border-t-blue-600 rounded-full animate-spin mb-2"></div>
@@ -200,18 +223,18 @@ function App() {
             </div>
           )}
           <div className="w-full flex flex-col items-center">
-            <label className="block text-lg font-medium text-gray-700 mb-2">
+            <label className="block text-lg font-semibold text-gray-700 mb-2">
               Upload Image
             </label>
             <input
               type="file"
               accept="image/*"
               onChange={handleImageUpload}
-              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              className="block w-full text-base text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-base file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
             />
           </div>
           {currentImage ? (
-            <div className="border border-gray-300 rounded-lg p-4 mt-2 w-full flex justify-center bg-white shadow-sm">
+            <div className="border border-gray-200 rounded-3xl p-6 mt-2 w-full flex justify-center bg-white shadow-xl">
               <AnnotationCanvas
                 imageUrl={currentImage.url}
                 imageWidth={currentImage.width}
@@ -227,11 +250,12 @@ function App() {
                 connectorColor={color}
                 connectorStyle={connectorStyle}
                 connectorThickness={connectorThickness}
+                svgRef={svgRef}
               />
             </div>
           ) : (
-            <div className="border border-gray-200 rounded-lg p-12 text-center mt-2 bg-white shadow-sm w-full">
-              <p className="text-gray-500">
+            <div className="border border-gray-200 rounded-3xl p-16 text-center mt-2 bg-white shadow-xl w-full">
+              <p className="text-gray-500 text-lg font-medium">
                 Upload an image to get started with annotations
               </p>
             </div>

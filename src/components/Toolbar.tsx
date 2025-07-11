@@ -6,6 +6,7 @@ import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import LinearScaleIcon from '@mui/icons-material/LinearScale';
 import UndoIcon from '@mui/icons-material/Undo';
 import BackspaceIcon from '@mui/icons-material/Backspace';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
 
 export type ToolType = 'pointer' | 'rectangle' | 'circle' | 'solid-circle';
 
@@ -22,6 +23,7 @@ interface ToolbarProps {
   onConnectorThicknessChange: (thickness: number) => void;
   onUndo: () => void;
   onClearAll: () => void;
+  onExport: () => void;
 }
 
 const tools: { type: ToolType; label: string; icon: React.ReactNode }[] = [
@@ -60,6 +62,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onConnectorThicknessChange,
   onUndo,
   onClearAll,
+  onExport,
 }) => {
   // Keyboard shortcuts
   useEffect(() => {
@@ -72,6 +75,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       } else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'x') {
         e.preventDefault();
         onClearAll();
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        onExport();
       } else if (e.key.toLowerCase() === 'v') {
         onSelectTool('pointer');
       } else if (e.key.toLowerCase() === 'r') {
@@ -84,7 +90,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onSelectTool, onUndo, onClearAll]);
+  }, [onSelectTool, onUndo, onClearAll, onExport]);
 
   return (
     <div
@@ -171,12 +177,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </div>
         </div>
         {/* Divider between main options and actions */}
-        <div className="flex flex-col items-center mx-6 justify-center">
-          <div className="h-10 w-1 rounded-full bg-gradient-to-b from-blue-400 via-purple-400 to-pink-400 shadow-md transition-transform duration-200 hover:scale-105 animate-divider-shine" style={{ minHeight: 36 }} />
+        <div className="flex flex-col items-center mx-8 justify-center">
+          <div className="h-8 w-1 rounded-full bg-gradient-to-b from-blue-400 via-purple-400 to-pink-400 shadow-md transition-transform duration-200 hover:scale-105 animate-divider-shine opacity-80" style={{ minHeight: 28 }} />
         </div>
-        {/* Undo and Clear All group */}
+        {/* Undo, Clear All, and Export group */}
         <div className="flex items-center pl-6" aria-label="Actions">
-          <div className="flex items-center space-x-4 bg-blue-50/80 rounded-full shadow-lg border border-blue-200 px-4 py-1 transition-transform duration-200 hover:scale-105 animate-pill-shine">
+          <div className="flex items-center space-x-6 bg-blue-50/80 rounded-full shadow-lg px-8 py-2 transition-transform duration-200 hover:scale-105 animate-pill-shine backdrop-blur-md">
             <button
               onClick={onUndo}
               className="w-10 h-10 flex items-center justify-center rounded-full transition-all duration-150 focus:outline-none text-xl bg-white/60 hover:bg-blue-100 hover:text-blue-700 text-gray-700 shadow-sm"
@@ -196,6 +202,16 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             >
               <span className="sr-only">Clear All</span>
               <BackspaceIcon fontSize="inherit" />
+            </button>
+            <button
+              onClick={onExport}
+              className="w-10 h-10 flex items-center justify-center rounded-full transition-all duration-150 focus:outline-none text-xl bg-white/60 hover:bg-green-100 hover:text-green-700 text-green-700 shadow-sm"
+              title="Export (Ctrl+E)"
+              aria-label="Export (Ctrl+E)"
+              tabIndex={0}
+            >
+              <span className="sr-only">Export</span>
+              <FileDownloadIcon fontSize="inherit" />
             </button>
           </div>
         </div>

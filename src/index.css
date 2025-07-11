@@ -1,3 +1,46 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+body {
+  font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  background: linear-gradient(135deg, #f7f7fa 0%, #e9e9f3 100%);
+  color: #222;
+  font-size: 18px;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body, #root {
+  min-height: 100vh;
+}
+
+/* Add a subtle shadow to the main content area */
+.main-content {
+  box-shadow: 0 8px 32px 0 rgba(60,60,100,0.10), 0 1.5px 6px 0 rgba(0,0,0,0.06);
+  border-radius: 2rem;
+  background: #fff;
+}
+
+/* Style file input for modern look */
+input[type="file"]::file-selector-button {
+  font-family: inherit;
+  border-radius: 9999px;
+  background: #f0f4ff;
+  color: #2563eb;
+  border: none;
+  padding: 0.5em 1.5em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+input[type="file"]::file-selector-button:hover {
+  background: #e0e7ff;
+}
+
+/* Add focus style for accessibility */
+:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
