@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, DragEvent } from 'react';
 import { useAnnotations } from './hooks/useAnnotations';
 import { ImageData } from './types/annotation';
 import { Toolbar, ToolType } from './components/Toolbar';
@@ -68,7 +68,7 @@ function App() {
   const [currentImage, setCurrentImage] = useState<ImageData | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
-  const { annotations, addAnnotation, updateAnnotation, deleteAnnotation, clearAnnotations, undo } = useAnnotations(savedAnnotations);
+  const { annotations, addAnnotation, updateAnnotation, deleteAnnotation, clearAnnotations, undo, redo } = useAnnotations(savedAnnotations);
   const [selectedTool, setSelectedTool] = useState<ToolType>('rectangle');
   const [color, setColor] = useState<string>('#2563eb'); // Tailwind blue-600
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -76,6 +76,8 @@ function App() {
   const [connectorThickness, setConnectorThickness] = useState<number>(2);
   const svgRef = useRef<SVGSVGElement>(null);
   // Remove activeTab state
+  const [isDragActive, setIsDragActive] = useState(false);
+  const uploadRef = useRef<HTMLDivElement>(null);
 
   // On mount, if savedImageMeta exists, load blob from IndexedDB and create object URL
   useEffect(() => {
@@ -97,9 +99,9 @@ function App() {
     }
   }, []);
 
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
+  // Unified image file handler
+  const handleImageFile = (file: File) => {
+    if (file && file.type.startsWith('image/')) {
       setImageLoading(true);
       setImageError(null);
       const imageKey = `image-${Date.now()}-${Math.random()}`;
@@ -117,7 +119,6 @@ function App() {
           };
           setCurrentImage(imageData);
           clearAnnotations();
-          // Save new image meta to localStorage, clear annotations
           localStorage.setItem('woosh-image', JSON.stringify({
             id: imageData.id,
             fileName: imageData.fileName,
@@ -139,6 +140,43 @@ function App() {
       });
     }
   };
+
+  // Drag-and-drop handlers
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleImageFile(e.dataTransfer.files[0]);
+    }
+  };
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragActive(true);
+  };
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragActive(false);
+  };
+
+  // Paste handler
+  useEffect(() => {
+    if (!uploadRef.current) return;
+    const handlePaste = (e: ClipboardEvent) => {
+      if (e.clipboardData) {
+        const items = e.clipboardData.items;
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) handleImageFile(file);
+          }
+        }
+      }
+    };
+    const node = uploadRef.current;
+    node.addEventListener('paste', handlePaste);
+    return () => node.removeEventListener('paste', handlePaste);
+  }, []);
 
   // Persist image and annotations to localStorage on change
   useEffect(() => {
@@ -179,62 +217,36 @@ function App() {
     }
   };
 
+  // Handle clear image
+  const handleClearImage = () => {
+    if (currentImage) {
+      // Revoke the object URL to free memory
+      URL.revokeObjectURL(currentImage.url);
+      // Clear the image from IndexedDB
+      deleteImageBlob(currentImage.id).catch(console.error);
+    }
+    // Clear state
+    setCurrentImage(null);
+    clearAnnotations();
+    // Clear localStorage
+    localStorage.removeItem('woosh-image');
+    localStorage.removeItem('woosh-annotations');
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 flex justify-center items-center" style={{ minHeight: '100vh' }}>
-      {/* Floating Toolbar at bottom, only if image is loaded */}
-      {currentImage && (
-        <Toolbar
-          selectedTool={selectedTool}
-          onSelectTool={setSelectedTool}
-          color={color}
-          onColorChange={(newColor) => {
-            setColor(newColor);
-          }}
-          connectorStyle={connectorStyle}
-          onConnectorStyleChange={setConnectorStyle}
-          connectorColor={color}
-          onConnectorColorChange={setColor}
-          connectorThickness={connectorThickness}
-          onConnectorThicknessChange={setConnectorThickness}
-          onUndo={undo}
-          onClearAll={clearAnnotations}
-          onExport={handleExport}
-        />
-      )}
-      <div className="main-content mx-auto px-8 py-12 flex flex-col items-center w-full max-w-5xl">
-        <header className="mb-10 text-center">
-          <h1 className="text-5xl font-extrabold text-gray-900 mb-3 tracking-tight" style={{ letterSpacing: '-0.01em' }}>
-            Image Annotation Software
+    <div className="min-h-screen bg-gray-50 flex flex-col justify-between items-center" style={{ minHeight: '100vh' }}>
+      <main className="flex-1 w-full flex flex-col items-center justify-center">
+        <header className="mb-8 text-center">
+          <h1 className="text-4xl sm:text-5xl font-extrabold text-gray-900 mb-2 tracking-tight">
+            VizAudit
           </h1>
-          <p className="text-lg text-gray-600 font-medium">
-            Effortlessly annotate images with clear, structured explanations
+          <p className="text-sm text-gray-500 font-medium mb-8">
+            Upload an image to audit visually. Draw, label, and export your findings!
           </p>
         </header>
-        <div className="w-full max-w-4xl flex flex-col items-center space-y-8 mt-12">
-          {imageLoading && (
-            <div className="flex flex-col items-center justify-center py-8">
-              <div className="w-12 h-12 border-4 border-blue-300 border-t-blue-600 rounded-full animate-spin mb-2"></div>
-              <div className="text-blue-700 font-medium">Loading image...</div>
-            </div>
-          )}
-          {imageError && (
-            <div className="flex flex-col items-center justify-center py-4">
-              <div className="text-red-600 font-semibold">{imageError}</div>
-            </div>
-          )}
+        {currentImage && (
           <div className="w-full flex flex-col items-center">
-            <label className="block text-lg font-semibold text-gray-700 mb-2">
-              Upload Image
-            </label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleImageUpload}
-              className="block w-full text-base text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-base file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-            />
-          </div>
-          {currentImage ? (
-            <div className="border border-gray-200 rounded-3xl p-6 mt-2 w-full flex justify-center bg-white shadow-xl">
+            <div className="border border-gray-200 rounded-3xl p-8 w-full flex justify-center bg-white shadow-2xl max-w-5xl">
               <AnnotationCanvas
                 imageUrl={currentImage.url}
                 imageWidth={currentImage.width}
@@ -253,15 +265,80 @@ function App() {
                 svgRef={svgRef}
               />
             </div>
-          ) : (
-            <div className="border border-gray-200 rounded-3xl p-16 text-center mt-2 bg-white shadow-xl w-full">
-              <p className="text-gray-500 text-lg font-medium">
-                Upload an image to get started with annotations
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
+          </div>
+        )}
+        {!currentImage && (
+          <div
+            ref={uploadRef}
+            tabIndex={0}
+            className={`border border-gray-200 rounded-3xl p-8 bg-white shadow-2xl w-full max-w-xl flex flex-col items-center justify-center mt-8 transition-all duration-200 outline-none ${isDragActive ? 'ring-4 ring-blue-300 border-blue-400 bg-blue-50' : ''}`}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDragEnd={handleDragLeave}
+          >
+            <label className="flex flex-col items-center w-full cursor-pointer">
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={e => {
+                  if (e.target.files && e.target.files[0]) handleImageFile(e.target.files[0]);
+                }}
+              />
+              <button
+                type="button"
+                className="px-8 py-3 bg-blue-600 text-white rounded-full shadow hover:bg-blue-700 transition text-lg font-semibold mb-2"
+                onClick={() => (document.querySelector('input[type=file]') as HTMLInputElement)?.click()}
+              >
+                Click to Upload or Drop/Paste Image
+              </button>
+              <span className="text-gray-400 text-sm mt-2">or drag & drop / paste an image here</span>
+            </label>
+            {isDragActive && (
+              <div className="absolute inset-0 bg-blue-100/60 rounded-3xl border-4 border-blue-400 flex items-center justify-center pointer-events-none z-10">
+                <span className="text-blue-700 text-lg font-semibold">Drop image to upload</span>
+              </div>
+            )}
+          </div>
+        )}
+        {/* Existing loading and error UI */}
+        {imageLoading && (
+          <div className="flex flex-col items-center justify-center py-8">
+            <div className="w-12 h-12 border-4 border-blue-300 border-t-blue-600 rounded-full animate-spin mb-2"></div>
+            <div className="text-blue-700 font-medium">Loading image...</div>
+          </div>
+        )}
+        {imageError && (
+          <div className="flex flex-col items-center justify-center py-4">
+            <div className="text-red-600 font-semibold">{imageError}</div>
+          </div>
+        )}
+      </main>
+      {/* Fixed bottom toolbar, only when image is loaded */}
+      {currentImage && (
+        <Toolbar
+          selectedTool={selectedTool}
+          onSelectTool={setSelectedTool}
+          color={color}
+          onColorChange={setColor}
+          connectorStyle={connectorStyle}
+          onConnectorStyleChange={setConnectorStyle}
+          connectorColor={color}
+          onConnectorColorChange={setColor}
+          connectorThickness={connectorThickness}
+          onConnectorThicknessChange={setConnectorThickness}
+          onUndo={undo}
+          onRedo={redo}
+          onClearAll={clearAnnotations}
+          onExport={handleExport}
+          onClearImage={handleClearImage}
+          className=""
+        />
+      )}
+      <footer className="w-full py-4 text-center text-gray-400 text-xs border-t border-gray-100 mt-8">
+        Created by Sukha
+      </footer>
     </div>
   );
 }

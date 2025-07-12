@@ -1,4 +1,4 @@
-export type AnnotationType = 'rectangle' | 'circle' | 'solid-circle' | 'text';
+export type AnnotationType = 'rectangle' | 'circle' | 'solid-circle' | 'text' | 'pencil';
 
 export interface Annotation {
   id: string;
@@ -19,6 +19,8 @@ export interface Annotation {
     x: number;
     y: number;
   };
+  // For pencil annotations
+  points?: { x: number; y: number }[];
 }
 
 export interface ImageData {
