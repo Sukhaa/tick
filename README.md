@@ -1,6 +1,6 @@
-# Image Annotation Software
+# VizAudit
 
-A modern React application for effortless image annotation with clear, structured explanations.
+An application for breakdown and labeling of vizzs or any image.
 
 ## Features
 
