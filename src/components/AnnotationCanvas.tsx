@@ -19,6 +19,7 @@ interface AnnotationCanvasProps {
   connectorThickness?: number;
   showLabelNumbers?: boolean;
   svgRef?: React.RefObject<SVGSVGElement | null>;
+  containerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 interface Point {
@@ -43,6 +44,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   connectorThickness = 2,
   showLabelNumbers = false,
   svgRef: externalSvgRef,
+  containerRef: externalContainerRef,
 }) => {
   console.log('AnnotationCanvas props:', { imageUrl, imageWidth, imageHeight });
   const [drawing, setDrawing] = useState(false);
@@ -60,7 +62,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const labelTextRefs = useRef({});
   // Add a ref for the container div
-  const containerRef = useRef<HTMLDivElement>(null);
+  const internalContainerRef = useRef<HTMLDivElement>(null);
+  const containerRef = externalContainerRef || internalContainerRef;
 
   // --- Dragging state for shapes and labels ---
   const [dragging, setDragging] = useState<{ id: string; type: 'shape' | 'label'; offset: { x: number; y: number } } | null>(null);
@@ -549,21 +552,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   };
 
   // --- State to store measured label text bounding boxes ---
-  const [labelBBoxes, setLabelBBoxes] = useState<{ [id: string]: { x: number; y: number; width: number; height: number } }>({});
+  // REMOVE: const [labelBBoxes, setLabelBBoxes] = useState<{ [id: string]: { x: number; y: number; width: number; height: number } }>({});
 
   // --- After render, measure label text bounding boxes ---
-  useEffect(() => {
-    const newBBoxes: { [id: string]: { x: number; y: number; width: number; height: number } } = {};
-    Object.entries(labelTextRefs.current).forEach(([id, el]) => {
-      if (el && typeof (el as SVGTextElement).getBBox === 'function') {
-        const bbox = (el as SVGTextElement).getBBox();
-        newBBoxes[id] = { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height };
-      }
-    });
-    setLabelBBoxes(newBBoxes);
-  }, [annotations, editingLabelId, editingText]);
+  // REMOVE: useEffect(() => { ... });
 
-  // Render SVG label boxes and connectors (fully normalized)
+  // Render SVG label boxes and connectors (fully normalized, SVG-only coordinates)
   const renderLabelsAndConnectors = () => {
     const lineHeight = labelFontSize * 1.2;
     const labelPadding = 12;
@@ -630,9 +624,11 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     // Track connector indices for elbow staggering
     let leftConnectorIndex = 0, rightConnectorIndex = 0;
     let leftConnectorCount = left.length, rightConnectorCount = right.length;
+    // maxRightLabelBoxWidth is already calculated in renderLabelsAndConnectors, so use the same logic here if needed
+    const rightEdgeX = imageWidth + imageX + labelMargin; // right edge is a safe margin from image
     return labelRenderList.map((info) => {
       const { ann, lines, height, y, isLeft } = info;
-      // Calculate label box dimensions
+      // Calculate label box dimensions for this label
       const labelBoxWidth = Math.max(180, lines.reduce((max, line) => Math.max(max, line.length), 0) * labelFontSize * 0.6 + 24); // 24px padding
       const labelBoxHeight = height;
       // Label box position (top left)
@@ -641,41 +637,33 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       if (isLeft) {
         labelBoxX = labelBuffer;
       } else {
-        labelBoxX = svgWidth - labelBuffer - labelBoxWidth;
+        // Always place right label as close as possible to image, unless it would overflow SVG
+        const minX = imageWidth + imageX + labelBuffer;
+        const maxX = svgWidth - labelBoxWidth - sidebarWidth;
+        labelBoxX = Math.min(minX, maxX);
       }
-      // Calculate width of the longest line of text
-      const approxCharWidth = labelFontSize * 0.6;
-      const labelPadding = 6; // px, gap between connector and text
-      const safeGap = 16; // px, space between image edge and label text
+      const safeGap = 16; // px, space between label box edge and text
+      // Calculate width of the longest line of text for this label
       const longestLine = lines.reduce((max, line) => line.length > max.length ? line : max, '');
-      const labelTextWidth = Math.max(approxCharWidth * longestLine.length, 40);
-      // For left labels, text always starts at labelBuffer + safeGap
-      // For right labels, text always starts at svgWidth - labelBuffer - safeGap - labelTextWidth
-      const labelTextX = isLeft
+      const labelTextWidth = Math.max(labelFontSize * 0.6 * longestLine.length, 40);
+      // For both left and right labels, set labelTextRenderX appropriately
+      const labelTextRenderX = isLeft
         ? labelBuffer + safeGap
-        : svgWidth - labelBuffer - safeGap - labelTextWidth;
-      // Vertically center connector on label text
+        : labelBoxX + labelBoxWidth - safeGap;
+      // Connector endpoint: at the nearest edge of the label text
+      const connectorEndX = isLeft
+        ? labelTextRenderX + labelTextWidth
+        : labelTextRenderX - labelTextWidth;
       const connectorEndY = labelBoxY + (lines.length * labelFontSize * 1.2) / 2 + 4;
-      // Use measured bbox if available for connector endpoint
-      const bbox = labelBBoxes[ann.id];
-      let connectorEndX: number;
-      let labelTextAnchor = isLeft ? 'start' : 'end';
-      let labelTextRenderX = labelTextX;
-      if (bbox) {
-        if (isLeft) {
-          connectorEndX = bbox.x + bbox.width + labelPadding;
-          labelTextRenderX = bbox.x; // left-aligned
-        } else {
-          connectorEndX = bbox.x - labelPadding;
-          labelTextRenderX = bbox.x + bbox.width; // right-aligned
-        }
-      } else {
-        // Fallback to estimated
-        connectorEndX = isLeft
-          ? labelTextX + labelTextWidth + labelPadding
-          : labelTextX - labelPadding;
-        labelTextRenderX = isLeft ? labelTextX : labelTextX + labelTextWidth;
-      }
+      // SVG-only: connectorEndX is always at the edge of the label box
+      // const connectorEndX = isLeft
+      //   ? labelBoxX + labelBoxWidth + labelPadding
+      //   : labelBoxX - labelPadding;
+      const labelTextAnchor = isLeft ? 'start' : 'end';
+      // For right labels, text is right-aligned at the right edge of the label box minus safeGap
+      // const labelTextRenderX = isLeft
+      //   ? labelTextX
+      //   : labelBoxX + labelBoxWidth - safeGap;
       // Badge position
       const labelBadgeX = isLeft ? imageX - badgeRadius : imageWidth + imageX + badgeRadius;
       const labelBadgeY = connectorEndY;
@@ -766,16 +754,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
               onMouseDown={e => handleLabelMouseDown(e, ann, labelBadgeX, labelBadgeY)}
               onClick={e => {
                 onSelectAnnotation(ann.id);
-                const container = containerRef.current;
-                const labelEl = labelTextRefs.current[ann.id];
-                if (container && labelEl) {
-                  const containerRect = container.getBoundingClientRect();
-                  const labelRect = labelEl.getBoundingClientRect();
-                  setInputPos({
-                    x: labelRect.left - containerRect.left,
-                    y: labelRect.top - containerRect.top,
-                  });
-                }
                 handleLabelClick(ann, labelBadgeX, labelBadgeY);
               }}
             >
@@ -964,7 +942,11 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   });
   const maxLeftLineLen = getMaxLineLength(leftLabels);
   const maxLeftLabelWidth = maxLeftLineLen * approxCharWidth;
-  const leftMargin = leftLabels.length > 0 ? maxLeftLabelWidth + labelBuffer : 0;
+  // Calculate max label box width for left and right labels
+  const maxLeftLabelBoxWidth = leftLabels.length > 0 ? Math.max(...leftLabels.map(ann => {
+    const lines = getLabelWrappedLines(ann.text || 'Add note...');
+    return Math.max(180, lines.reduce((max, line) => Math.max(max, line.length), 0) * approxCharWidth + 24);
+  })) : 0;
   // Right labels
   const rightLabels = annotations.filter(ann => {
     const center = ann.position.x + (ann.size?.width || 0) / 2;
@@ -972,8 +954,37 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   });
   const maxRightLineLen = getMaxLineLength(rightLabels);
   const maxRightLabelWidth = maxRightLineLen * approxCharWidth;
-  const rightMargin = rightLabels.length > 0 ? maxRightLabelWidth + labelBuffer : 0;
-
+  // maxRightLabelBoxWidth is already calculated in renderLabelsAndConnectors, so use the same logic here if needed
+  const sidebarWidth = 64; // px, fixed width for sidebar UI
+  // For left labels, calculate the leftmost X of the text
+  let minLeftTextX = 0;
+  leftLabels.forEach(ann => {
+    const lines = getLabelWrappedLines(ann.text || 'Add note...');
+    const labelBoxWidth = Math.max(180, lines.reduce((max, line) => Math.max(max, line.length), 0) * approxCharWidth + 24);
+    const safeGap = 16;
+    const longestLine = lines.reduce((max, line) => line.length > max.length ? line : max, '');
+    const labelTextWidth = Math.max(labelFontSize * 0.6 * longestLine.length, 40);
+    // labelBoxX is labelBuffer
+    const leftTextX = labelBuffer + safeGap;
+    // The left edge of the text is leftTextX
+    if (minLeftTextX === 0 || leftTextX < minLeftTextX) minLeftTextX = leftTextX;
+  });
+  // Add buffer
+  const leftMargin = Math.max(leftLabels.length > 0 ? maxLeftLabelBoxWidth + labelBuffer : labelBuffer, minLeftTextX + 24);
+  // For right labels, calculate the rightmost X of the text, assuming labelBoxX is always at imageX + imageWidth + labelBuffer
+  let maxRightTextX = imageWidth + leftMargin; // start with image right edge
+  rightLabels.forEach(ann => {
+    const lines = getLabelWrappedLines(ann.text || 'Add note...');
+    const labelBoxWidth = Math.max(180, lines.reduce((max, line) => Math.max(max, line.length), 0) * approxCharWidth + 24);
+    const safeGap = 16;
+    const longestLine = lines.reduce((max, line) => line.length > max.length ? line : max, '');
+    const labelTextWidth = Math.max(labelFontSize * 0.6 * longestLine.length, 40);
+    const labelBoxX = leftMargin + imageWidth + labelBuffer; // always as close as possible
+    const rightTextX = labelBoxX + labelBoxWidth - safeGap + labelTextWidth;
+    if (rightTextX > maxRightTextX) maxRightTextX = rightTextX;
+  });
+  // Add sidebar and buffer
+  const rightMargin = Math.max((rightLabels.length > 0 ? maxRightLabelWidth + labelBuffer : labelBuffer) + sidebarWidth, maxRightTextX - (leftMargin + imageWidth) + sidebarWidth + 24);
   const svgWidth = leftMargin + imageWidth + rightMargin;
   const svgHeight = imageHeight + topMargin + bottomMargin;
   const imageX = leftMargin;
@@ -986,6 +997,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const badgeFontSize = Math.max(18, Math.min(32, Math.round(imageWidth * 0.025)));
 
   // labelFontSize is already declared above in the margin calculation section
+  const labelMargin = 32; // px, fixed margin between image and right labels
 
   if (!imageWidth || !imageHeight || imageWidth < 2 || imageHeight < 2) {
     return <div className="w-full h-64 flex items-center justify-center text-gray-400">No image loaded</div>;
@@ -1017,14 +1029,15 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   }, [editingLabelId]);
 
   return (
-    <div ref={containerRef} className="relative w-full" style={{ maxWidth: svgWidth }}>
+    <div ref={containerRef} className="relative" style={{ width: svgWidth }}>
       {/* Removed the HTML <img> tag here */}
       <svg
         ref={svgRef}
         viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-        width="100%"
+        width={svgWidth}
+        height={svgHeight}
         className="cursor-crosshair"
-        style={{ height: 'auto', maxWidth: '100%', display: 'block' }}
+        style={{ display: 'block' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleSvgMouseMove}
         onMouseUp={handleSvgMouseUp}

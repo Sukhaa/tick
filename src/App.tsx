@@ -75,9 +75,11 @@ function App() {
   const [connectorStyle, setConnectorStyle] = useState<'solid' | 'dashed' | 'dotted'>('dashed');
   const [connectorThickness, setConnectorThickness] = useState<number>(2);
   const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   // Remove activeTab state
   const [isDragActive, setIsDragActive] = useState(false);
   const uploadRef = useRef<HTMLDivElement>(null);
+  const [exportFormat, setExportFormat] = useState<'png' | 'jpg'>('png');
 
   // On mount, if savedImageMeta exists, load blob from IndexedDB and create object URL
   useEffect(() => {
@@ -205,12 +207,12 @@ function App() {
     }
 
     try {
-      const filename = getExportFilename(currentImage.fileName, 'png');
+      const filename = getExportFilename(currentImage.fileName, exportFormat);
       await exportAnnotatedImage(svgRef.current, {
-        format: 'png',
+        format: exportFormat,
         quality: 0.9,
         filename
-      });
+      }, containerRef.current || undefined);
     } catch (error) {
       console.error('Export failed:', error);
       alert('Export failed. Please try again.');
@@ -263,6 +265,7 @@ function App() {
                 connectorStyle={connectorStyle}
                 connectorThickness={connectorThickness}
                 svgRef={svgRef}
+                containerRef={containerRef}
               />
             </div>
           </div>
@@ -317,24 +320,38 @@ function App() {
       </main>
       {/* Fixed bottom toolbar, only when image is loaded */}
       {currentImage && (
-        <Toolbar
-          selectedTool={selectedTool}
-          onSelectTool={setSelectedTool}
-          color={color}
-          onColorChange={setColor}
-          connectorStyle={connectorStyle}
-          onConnectorStyleChange={setConnectorStyle}
-          connectorColor={color}
-          onConnectorColorChange={setColor}
-          connectorThickness={connectorThickness}
-          onConnectorThicknessChange={setConnectorThickness}
-          onUndo={undo}
-          onRedo={redo}
-          onClearAll={clearAnnotations}
-          onExport={handleExport}
-          onClearImage={handleClearImage}
-          className=""
-        />
+        <div className="w-full max-w-5xl px-4 pb-4">
+          <div className="flex justify-center items-center gap-2 mb-4">
+            <label htmlFor="exportFormat" className="text-gray-700 font-medium">Export Format:</label>
+            <select
+              id="exportFormat"
+              className="p-2 border border-gray-300 rounded-md text-sm"
+              value={exportFormat}
+              onChange={(e) => setExportFormat(e.target.value as 'png' | 'jpg')}
+            >
+              <option value="png">PNG</option>
+              <option value="jpg">JPG</option>
+            </select>
+          </div>
+          <Toolbar
+            selectedTool={selectedTool}
+            onSelectTool={setSelectedTool}
+            color={color}
+            onColorChange={setColor}
+            connectorStyle={connectorStyle}
+            onConnectorStyleChange={setConnectorStyle}
+            connectorColor={color}
+            onConnectorColorChange={setColor}
+            connectorThickness={connectorThickness}
+            onConnectorThicknessChange={setConnectorThickness}
+            onUndo={undo}
+            onRedo={redo}
+            onClearAll={clearAnnotations}
+            onExport={handleExport}
+            onClearImage={handleClearImage}
+            className=""
+          />
+        </div>
       )}
       <footer className="w-full py-4 text-center text-gray-400 text-xs border-t border-gray-100 mt-8">
         Created by Sukha
