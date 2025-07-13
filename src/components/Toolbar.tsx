@@ -33,6 +33,8 @@ interface ToolbarProps {
   onClearAll: () => void;
   onExport: () => void;
   onClearImage: () => void;
+  exportFormat: 'png' | 'jpg';
+  onExportFormatChange: (format: 'png' | 'jpg') => void;
   className?: string;
 }
 
@@ -131,6 +133,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onClearAll,
   onExport,
   onClearImage,
+  exportFormat,
+  onExportFormatChange,
   className,
 }) => {
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
@@ -174,8 +178,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       case 'undo': onUndo(); break;
       case 'redo': onRedo(); break;
       case 'clear': onClearAll(); break;
-      case 'export': onExport(); break;
-      case 'clearImage': onClearImage(); break;
+      case 'export':
+        console.log('[DEBUG] Export button clicked. exportFormat:', exportFormat);
+        onExport();
+        break;
+      case 'clearImage':
+        console.log('[DEBUG] Clear Image button clicked');
+        onClearImage();
+        break;
     }
   };
 
@@ -326,36 +336,40 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             </div>
           </div>
         )}
-      </div>
-      {/* Export/Clear Pill */}
-      <div
-        className="flex items-center bg-white rounded-full px-14 py-2 pointer-events-auto shadow-xl gap-2"
-        style={{
-          boxShadow: '0 4px 24px 0 rgba(60,60,100,0.10), 0 1.5px 6px 0 rgba(0,0,0,0.06)',
-          background: '#fff',
-          border: 'none',
-          outline: 'none',
-        }}
-      >
-        {exportTools.map((tool, idx) => (
-          <button
-            key={tool.action}
-            onClick={() => handleActionClick(tool.action)}
-            className={[
-              toolbarButtonClass,
-              idx === 0 ? 'ml-4' : '',
-              idx === exportTools.length - 1 ? 'mr-4' : '',
-            ].join(' ')}
-            title={`${tool.label} (${tool.shortcut}) - ${tool.description}`}
-            aria-label={`${tool.label} (${tool.shortcut})`}
-            tabIndex={0}
+        {/* Export and Clear Image section */}
+        <div className="flex items-center gap-2 ml-4">
+          {/* Export format dropdown */}
+          <select
+            className="p-1 border border-gray-300 rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+            value={exportFormat}
+            onChange={e => onExportFormatChange(e.target.value as 'png' | 'jpg')}
+            style={{ height: 32 }}
+            aria-label="Export format"
           >
-            <span className="sr-only">{tool.label}</span>
-            <div className="transition-transform duration-200 group-hover:scale-110">
-              {tool.icon}
-            </div>
+            <option value="png">PNG</option>
+            <option value="jpg">JPG</option>
+          </select>
+          {/* Export button */}
+          <button
+            type="button"
+            className={toolbarButtonClass}
+            title="Export annotated image"
+            onClick={() => handleActionClick('export')}
+            aria-label="Export"
+          >
+            <FileDownloadIcon fontSize="medium" />
           </button>
-        ))}
+          {/* Clear Image button */}
+          <button
+            type="button"
+            className={toolbarButtonClass}
+            title="Clear current image"
+            onClick={() => handleActionClick('clearImage')}
+            aria-label="Clear Image"
+          >
+            <ClearIcon fontSize="medium" />
+          </button>
+        </div>
       </div>
     </div>
   );

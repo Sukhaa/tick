@@ -321,18 +321,6 @@ function App() {
       {/* Fixed bottom toolbar, only when image is loaded */}
       {currentImage && (
         <div className="w-full max-w-5xl px-4 pb-4">
-          <div className="flex justify-center items-center gap-2 mb-4">
-            <label htmlFor="exportFormat" className="text-gray-700 font-medium">Export Format:</label>
-            <select
-              id="exportFormat"
-              className="p-2 border border-gray-300 rounded-md text-sm"
-              value={exportFormat}
-              onChange={(e) => setExportFormat(e.target.value as 'png' | 'jpg')}
-            >
-              <option value="png">PNG</option>
-              <option value="jpg">JPG</option>
-            </select>
-          </div>
           <Toolbar
             selectedTool={selectedTool}
             onSelectTool={setSelectedTool}
@@ -349,6 +337,8 @@ function App() {
             onClearAll={clearAnnotations}
             onExport={handleExport}
             onClearImage={handleClearImage}
+            exportFormat={exportFormat}
+            onExportFormatChange={setExportFormat}
             className=""
           />
         </div>

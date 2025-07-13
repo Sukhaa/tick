@@ -999,6 +999,13 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   // labelFontSize is already declared above in the margin calculation section
   const labelMargin = 32; // px, fixed margin between image and right labels
 
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+
+  const handleZoomIn = () => setZoom(z => Math.min(z + 0.2, 4));
+  const handleZoomOut = () => setZoom(z => Math.max(z - 0.2, 0.2));
+  const handleZoomReset = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
+
   if (!imageWidth || !imageHeight || imageWidth < 2 || imageHeight < 2) {
     return <div className="w-full h-64 flex items-center justify-center text-gray-400">No image loaded</div>;
   }
@@ -1029,63 +1036,96 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   }, [editingLabelId]);
 
   return (
-    <div ref={containerRef} className="relative" style={{ width: svgWidth }}>
-      {/* Removed the HTML <img> tag here */}
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-        width={svgWidth}
-        height={svgHeight}
-        className="cursor-crosshair"
-        style={{ display: 'block' }}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleSvgMouseMove}
-        onMouseUp={handleSvgMouseUp}
+    <div ref={containerRef} className="relative w-full h-full flex items-center justify-center bg-white" style={{ minHeight: 400, minWidth: 400 }}>
+      <div
+        className="relative"
+        style={{
+          maxWidth: '100%',
+          maxHeight: '80vh',
+          overflow: 'auto',
+          position: 'relative',
+          background: '#fff',
+        }}
+        onWheel={e => {
+          if (e.ctrlKey) return; // Let browser handle pinch-to-zoom
+          e.preventDefault();
+          if (e.deltaY < 0) setZoom(z => Math.min(z + 0.1, 4));
+          else setZoom(z => Math.max(z - 0.1, 0.2));
+        }}
       >
-        {/* Arrowhead marker definitions */}
-        <defs>
-          <marker
-            id="arrowhead"
-            markerWidth="10"
-            markerHeight="7"
-            refX="10"
-            refY="3.5"
-            orient="auto"
-            markerUnits="strokeWidth"
-          >
-            <polygon points="0 0, 10 3.5, 0 7" fill="#bbb" />
-          </marker>
-          <marker
-            id="arrowhead-selected"
-            markerWidth="10"
-            markerHeight="7"
-            refX="10"
-            refY="3.5"
-            orient="auto"
-            markerUnits="strokeWidth"
-          >
-            <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb" />
-          </marker>
-        </defs>
-        {/* SVG defs for label shadow */}
-        <defs>
-          <filter id="labelShadow" x="-10%" y="-10%" width="120%" height="120%">
-            <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.10" />
-          </filter>
-        </defs>
-        {/* Render the image centered in the expanded SVG */}
-        <image
-          href={imageUrl}
-          x={imageX}
-          y={imageY}
-          width={imageWidth}
-          height={imageHeight}
-          style={{ pointerEvents: 'none' }}
-        />
-        {renderLabelsAndConnectors()}
-        {renderAnnotations()}
-        {renderPreview()}
-      </svg>
+        {/* Zoom controls at bottom right of visible area */}
+        <div style={{ position: 'absolute', bottom: '1rem', right: '1rem', zIndex: 10 }} className="flex flex-col gap-1 bg-white bg-opacity-80 rounded shadow p-1">
+          <button onClick={handleZoomIn} className="px-2 py-1 rounded hover:bg-blue-100 font-bold" title="Zoom In">+</button>
+          <button onClick={handleZoomOut} className="px-2 py-1 rounded hover:bg-blue-100 font-bold" title="Zoom Out">-</button>
+          <button onClick={handleZoomReset} className="px-2 py-1 rounded hover:bg-blue-100 font-bold" title="Reset Zoom">⟳</button>
+          <span className="text-xs text-gray-600 text-center">{Math.round(zoom * 100)}%</span>
+        </div>
+        {/* SVG with transform */}
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+          width={svgWidth}
+          height={svgHeight}
+          className="cursor-crosshair"
+          style={{
+            border: '1px solid #e5e7eb',
+            background: '#fff',
+            maxWidth: '100%',
+            maxHeight: '80vh',
+            transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
+            transformOrigin: 'center center',
+            transition: 'transform 0.2s',
+            display: 'block',
+          }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleSvgMouseMove}
+          onMouseUp={handleSvgMouseUp}
+        >
+          {/* Arrowhead marker definitions */}
+          <defs>
+            <marker
+              id="arrowhead"
+              markerWidth="10"
+              markerHeight="7"
+              refX="10"
+              refY="3.5"
+              orient="auto"
+              markerUnits="strokeWidth"
+            >
+              <polygon points="0 0, 10 3.5, 0 7" fill="#bbb" />
+            </marker>
+            <marker
+              id="arrowhead-selected"
+              markerWidth="10"
+              markerHeight="7"
+              refX="10"
+              refY="3.5"
+              orient="auto"
+              markerUnits="strokeWidth"
+            >
+              <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb" />
+            </marker>
+          </defs>
+          {/* SVG defs for label shadow */}
+          <defs>
+            <filter id="labelShadow" x="-10%" y="-10%" width="120%" height="120%">
+              <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.10" />
+            </filter>
+          </defs>
+          {/* Render the image centered in the expanded SVG */}
+          <image
+            href={imageUrl}
+            x={imageX}
+            y={imageY}
+            width={imageWidth}
+            height={imageHeight}
+            style={{ pointerEvents: 'none' }}
+          />
+          {renderLabelsAndConnectors()}
+          {renderAnnotations()}
+          {renderPreview()}
+        </svg>
+      </div>
       {/* Inline label editing input */}
       {editingLabelId && inputPos && (
         <textarea
