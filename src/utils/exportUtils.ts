@@ -78,6 +78,49 @@ async function inlineHtmlImages(container: HTMLElement) {
   await Promise.all(promises);
 }
 
+// Helper to hide .no-export elements and restore them after
+function hideNoExportElements(container: HTMLElement): () => void {
+  const elements = Array.from(container.querySelectorAll('.no-export'));
+  const prevDisplays = elements.map(el => (el as HTMLElement).style.display);
+  elements.forEach(el => ((el as HTMLElement).style.display = 'none'));
+  return () => {
+    elements.forEach((el, i) => ((el as HTMLElement).style.display = prevDisplays[i]));
+  };
+}
+
+// Helper to get the tightest bounding box of all SVG content (image, labels, connectors, title)
+function getContentBoundingBox(svg: SVGSVGElement): { x: number; y: number; width: number; height: number } {
+  // Get all visible SVG elements except defs/markers
+  const contentElements = Array.from(svg.querySelectorAll('*'))
+    .filter(el => {
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'defs' || tag === 'marker' || tag === 'filter') return false;
+      if (el instanceof SVGGraphicsElement && el.getBBox) {
+        const bbox = el.getBBox();
+        return bbox.width > 0 && bbox.height > 0;
+      }
+      return false;
+    }) as SVGGraphicsElement[];
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  contentElements.forEach(el => {
+    const bbox = el.getBBox();
+    minX = Math.min(minX, bbox.x);
+    minY = Math.min(minY, bbox.y);
+    maxX = Math.max(maxX, bbox.x + bbox.width);
+    maxY = Math.max(maxY, bbox.y + bbox.height);
+  });
+  // Fallback to full SVG if nothing found
+  if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
+    minX = 0; minY = 0; maxX = svg.width.baseVal.value; maxY = svg.height.baseVal.value;
+  }
+  // Add 20px padding
+  minX = Math.max(0, minX - 20);
+  minY = Math.max(0, minY - 20);
+  maxX = Math.min(svg.width.baseVal.value, maxX + 20);
+  maxY = Math.min(svg.height.baseVal.value, maxY + 20);
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
 export const exportAnnotatedImage = async (
   svgElement: SVGSVGElement,
   options: ExportOptions = { format: 'png', quality: 0.9 },
@@ -150,23 +193,33 @@ export const exportAnnotatedImage = async (
     console.log('[DEBUG] <image> href:', img.getAttribute('href') || img.getAttribute('xlink:href'), img.outerHTML);
   });
 
+  // Hide .no-export elements before export
+  const restoreNoExport = hideNoExportElements(target);
+
+  // Calculate content bounding box
+  const svgForBBox = target.querySelector('svg') || svgElement;
+  const bbox = getContentBoundingBox(svgForBBox);
+
   try {
     let dataUrl: string;
+    const clip = { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height };
     if (format === 'png') {
       dataUrl = await toPng(target, {
         cacheBust: true,
         backgroundColor: '#fff',
         width: target.scrollWidth,
-        height: target.scrollHeight
-      });
+        height: target.scrollHeight,
+        clip
+      } as any);
     } else {
       dataUrl = await toJpeg(target, {
         cacheBust: true,
         backgroundColor: '#fff',
         quality,
         width: target.scrollWidth,
-        height: target.scrollHeight
-      });
+        height: target.scrollHeight,
+        clip
+      } as any);
     }
     // Download the image
     const link = document.createElement('a');
@@ -181,8 +234,10 @@ export const exportAnnotatedImage = async (
       target.parentNode.removeChild(target);
     }
     
+    restoreNoExport();
     return;
   } catch (error) {
+    restoreNoExport();
     // Improved error logging
     console.error('Export failed:', error);
     console.error('Error type:', typeof error);

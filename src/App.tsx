@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef, DragEvent } from 'react';
 import { useAnnotations } from './hooks/useAnnotations';
-import { ImageData } from './types/annotation';
+import { useGallery } from './hooks/useGallery';
+import { ImageData, SavedProject } from './types/annotation';
 import { Toolbar, ToolType } from './components/Toolbar';
 import { AnnotationCanvas } from './components/AnnotationCanvas';
+import { Gallery } from './components/Gallery';
 import { exportAnnotatedImage, getExportFilename } from './utils/exportUtils';
-import './App.css';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { Box, Typography, IconButton, Tooltip, Divider } from '@mui/material';
 
 // --- IndexedDB utility for image blobs ---
 const DB_NAME = 'woosh-image-db';
@@ -46,29 +49,31 @@ async function deleteImageBlob(key: string) {
   });
 }
 
-function App() {
-  // Restore from localStorage if available
-  const savedImageMeta = (() => {
-    try {
-      const raw = localStorage.getItem('woosh-image');
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  })();
-  const savedAnnotations = (() => {
-    try {
-      const raw = localStorage.getItem('woosh-annotations');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  })();
+// Add a local type for runtime use
+interface RuntimeImageData extends ImageData {
+  url: string;
+}
 
-  const [currentImage, setCurrentImage] = useState<ImageData | null>(null);
+function App() {
+  // Gallery state
+  const { 
+    projects, 
+    loading: galleryLoading, 
+    saveProject, 
+    loadProject, 
+    deleteProject, 
+    updateProjectMetadata, 
+    generateThumbnail 
+  } = useGallery();
+
+  // App state
+  // Use RuntimeImageData for currentImage state
+  const [currentImage, setCurrentImage] = useState<RuntimeImageData | null>(null);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
-  const { annotations, addAnnotation, updateAnnotation, deleteAnnotation, clearAnnotations, undo, redo } = useAnnotations(savedAnnotations);
+  const [showGallery, setShowGallery] = useState(true);
+  const { annotations, addAnnotation, updateAnnotation, deleteAnnotation, clearAnnotations, undo, redo } = useAnnotations([]);
   const [selectedTool, setSelectedTool] = useState<ToolType>('rectangle');
   const [color, setColor] = useState<string>('#2563eb'); // Tailwind blue-600
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -76,94 +81,107 @@ function App() {
   const [connectorThickness, setConnectorThickness] = useState<number>(2);
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  // Remove activeTab state
   const [isDragActive, setIsDragActive] = useState(false);
   const uploadRef = useRef<HTMLDivElement>(null);
   const [exportFormat, setExportFormat] = useState<'png' | 'jpg'>('png');
+  const [title, setTitle] = useState<string>('');
 
-  // On mount, if savedImageMeta exists, load blob from IndexedDB and create object URL
+  // Auto-save current project when annotations or title change
   useEffect(() => {
-    if (savedImageMeta && savedImageMeta.imageKey) {
-      setImageLoading(true);
-      setImageError(null);
-      getImageBlob(savedImageMeta.imageKey).then(blob => {
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          setCurrentImage({ ...savedImageMeta, url });
-        } else {
-          setImageError('Failed to load image from storage.');
+    if (currentProjectId && currentImage && !imageLoading) {
+      const autoSave = async () => {
+        try {
+          // Find the current project in the gallery to get its thumbnailUrl
+          const currentProject = projects.find(p => p.id === currentProjectId);
+          await saveProject(
+            currentProjectId,
+            title, // Use title as the project name
+            currentImage.fileName || 'image.jpg',
+            currentImage.id,
+            currentImage.width,
+            currentImage.height,
+            annotations,
+            title,
+            currentProject?.thumbnailUrl // Preserve the thumbnail if it exists
+          );
+        } catch (error) {
+          console.error('Auto-save failed:', error);
         }
-        setImageLoading(false);
-      }).catch(() => {
-        setImageError('Failed to load image from storage.');
-        setImageLoading(false);
-      });
+      };
+      // Debounce auto-save
+      const timeoutId = setTimeout(autoSave, 1000);
+      return () => clearTimeout(timeoutId);
     }
-  }, []);
+  }, [currentProjectId, currentImage, annotations, title, saveProject, imageLoading, projects]);
 
   // Unified image file handler
-  const handleImageFile = (file: File) => {
+  const handleImageFile = async (file: File) => {
     if (file && file.type.startsWith('image/')) {
       setImageLoading(true);
       setImageError(null);
-      const imageKey = `image-${Date.now()}-${Math.random()}`;
-      saveImageBlob(imageKey, file).then(() => {
+      
+      try {
+        const imageKey = `image-${Date.now()}-${Math.random()}`;
+        await saveImageBlob(imageKey, file);
+        
         const img = new window.Image();
-        img.onload = () => {
-          const url = URL.createObjectURL(file);
+        img.onload = async () => {
+          // Only store serializable data in project
           const imageData: ImageData = {
             id: imageKey,
             fileName: file.name,
-            url,
             width: img.width,
             height: img.height,
             annotations: [],
           };
-          setCurrentImage(imageData);
-          clearAnnotations();
-          localStorage.setItem('woosh-image', JSON.stringify({
-            id: imageData.id,
-            fileName: imageData.fileName,
+          
+          // Generate thumbnail
+          const thumbnailUrl = await generateThumbnail(file);
+          
+          // Create new project
+          const projectId = `project-${Date.now()}-${Math.random()}`;
+          await saveProject(
+            projectId,
+            '', // Start with empty name, will be set by title
+            file.name,
             imageKey,
-            width: imageData.width,
-            height: imageData.height
-          }));
-          localStorage.setItem('woosh-annotations', JSON.stringify([]));
+            img.width,
+            img.height,
+            [],
+            '',
+            thumbnailUrl
+          );
+          
+          // Reconstruct URL for use in app state only
+          const url = URL.createObjectURL(file);
+          // Set a default title
+          const defaultTitle = `Untitled Project ${new Date().toLocaleDateString()}`;
+          setCurrentImage({ ...imageData, url });
+          setCurrentProjectId(projectId);
+          setTitle(defaultTitle);
+          clearAnnotations();
+          setShowGallery(false);
           setImageLoading(false);
         };
+        
         img.onerror = () => {
           setImageError('Failed to load the selected image.');
           setImageLoading(false);
         };
+        
         img.src = URL.createObjectURL(file);
-      }).catch(() => {
+      } catch (error) {
         setImageError('Failed to save image to storage.');
         setImageLoading(false);
-      });
+      }
     }
   };
 
-  // Drag-and-drop handlers
-  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleImageFile(e.dataTransfer.files[0]);
-    }
-  };
-  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragActive(true);
-  };
-  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragActive(false);
-  };
-
-  // Paste handler
+  // Global paste handler for the entire app
   useEffect(() => {
-    if (!uploadRef.current) return;
     const handlePaste = (e: ClipboardEvent) => {
+      // Only allow pasting if no image is loaded
+      if (currentImage) return;
       if (e.clipboardData) {
         const items = e.clipboardData.items;
         for (let i = 0; i < items.length; i++) {
@@ -175,29 +193,120 @@ function App() {
         }
       }
     };
-    const node = uploadRef.current;
-    node.addEventListener('paste', handlePaste);
-    return () => node.removeEventListener('paste', handlePaste);
-  }, []);
-
-  // Persist image and annotations to localStorage on change
-  useEffect(() => {
-    if (currentImage) {
-      localStorage.setItem('woosh-image', JSON.stringify({
-        id: currentImage.id,
-        fileName: currentImage.fileName,
-        imageKey: currentImage.id,
-        width: currentImage.width,
-        height: currentImage.height
-      }));
-    }
+    
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
   }, [currentImage]);
-  useEffect(() => {
-    localStorage.setItem('woosh-annotations', JSON.stringify(annotations));
-  }, [annotations]);
+
+  // Gallery handlers
+  const handleSelectProject = async (project: SavedProject) => {
+    setImageLoading(true);
+    setImageError(null);
+    
+    try {
+      // Load image blob
+      const blob = await getImageBlob(project.imageKey);
+      if (!blob) {
+        throw new Error('Image not found');
+      }
+      
+      // Reconstruct URL for use in app state only
+      const url = URL.createObjectURL(blob);
+      const imageData: RuntimeImageData = {
+        id: project.imageKey,
+        fileName: project.fileName,
+        width: project.width,
+        height: project.height,
+        annotations: project.annotations,
+        url, // Only for runtime use
+      };
+      
+      setCurrentImage(imageData);
+      setCurrentProjectId(project.id);
+      setTitle(project.title);
+      // Load annotations into the hook
+      clearAnnotations();
+      project.annotations.forEach(ann => addAnnotation(ann));
+      setShowGallery(false);
+      setImageLoading(false);
+    } catch (error) {
+      setImageError('Failed to load project.');
+      setImageLoading(false);
+    }
+  };
+
+  const handleDeleteProject = async (projectId: string) => {
+    try {
+      await deleteProject(projectId);
+      // If this was the current project, clear it
+      if (currentProjectId === projectId) {
+        setCurrentImage(null);
+        setCurrentProjectId(null);
+        setTitle('');
+        clearAnnotations();
+        setShowGallery(true);
+      }
+    } catch (error) {
+      console.error('Failed to delete project:', error);
+    }
+  };
+
+  const handleExportProject = async (project: SavedProject) => {
+    try {
+      // Load the project temporarily for export
+      const blob = await getImageBlob(project.imageKey);
+      if (!blob) {
+        throw new Error('Image not found');
+      }
+      
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        // Create a temporary canvas with the project data
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        
+        canvas.width = project.width;
+        canvas.height = project.height;
+        
+        // Draw image
+        ctx.drawImage(img, 0, 0);
+        
+        // TODO: Draw annotations on the canvas
+        // This would require implementing the annotation rendering logic
+        
+        // Export
+        const filename = getExportFilename(project.fileName, exportFormat);
+        const link = document.createElement('a');
+        link.download = filename;
+        link.href = canvas.toDataURL(`image/${exportFormat}`, 0.9);
+        link.click();
+        
+        URL.revokeObjectURL(url);
+      };
+      img.src = url;
+    } catch (error) {
+      console.error('Failed to export project:', error);
+    }
+  };
+
+  const handleBackToGallery = () => {
+    setCurrentImage(null);
+    setCurrentProjectId(null);
+    setTitle('');
+    clearAnnotations();
+    setShowGallery(true);
+  };
 
   // Pass selection state to canvas
   const handleSelectAnnotation = (id: string | null) => setSelectedId(id);
+  // Update title everywhere from the central source of truth
+  const handleUpdateTitle = async (newTitle: string) => {
+    if (!currentProjectId) return;
+    setTitle(newTitle);
+    await updateProjectMetadata(currentProjectId, { name: newTitle, title: newTitle });
+  };
 
   // Handle export
   const handleExport = async () => {
@@ -219,36 +328,27 @@ function App() {
     }
   };
 
-  // Handle clear image
+  // Handle clear image (now goes back to gallery)
   const handleClearImage = () => {
-    if (currentImage) {
-      // Revoke the object URL to free memory
-      URL.revokeObjectURL(currentImage.url);
-      // Clear the image from IndexedDB
-      deleteImageBlob(currentImage.id).catch(console.error);
-    }
-    // Clear state
-    setCurrentImage(null);
-    clearAnnotations();
-    // Clear localStorage
-    localStorage.removeItem('woosh-image');
-    localStorage.removeItem('woosh-annotations');
+    handleBackToGallery();
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-between items-center" style={{ minHeight: '100vh' }}>
-      <main className="flex-1 w-full flex flex-col items-center justify-center">
-        <header className="mb-8 text-center">
-          <h1 className="text-4xl sm:text-5xl font-extrabold text-gray-900 mb-2 tracking-tight">
-            VizAudit
-          </h1>
-          <p className="text-sm text-gray-500 font-medium mb-8">
-            Upload an image to audit visually. Draw, label, and export your findings!
-          </p>
-        </header>
-        {currentImage && (
-          <div className="w-full flex flex-col items-center">
-            <div className="border border-gray-200 rounded-3xl p-8 w-full flex justify-center bg-white shadow-2xl max-w-5xl">
+    <Box sx={{ minHeight: '100vh', bgcolor: 'gray.50' }}>
+      {showGallery ? (
+        <Gallery
+          projects={projects}
+          onSelectProject={handleSelectProject}
+          onDeleteProject={handleDeleteProject}
+          onUploadNew={handleImageFile}
+          onExportProject={handleExportProject}
+          updateProjectMetadata={updateProjectMetadata}
+        />
+      ) : (
+        <Box sx={{ width: '100%', maxWidth: '100vw', mx: 'auto', pt: 2 }}>
+          {/* Remove header row and spacers, move back button into AnnotationCanvas */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            {currentImage && (
               <AnnotationCanvas
                 imageUrl={currentImage.url}
                 imageWidth={currentImage.width}
@@ -258,69 +358,29 @@ function App() {
                 annotations={annotations}
                 onAddAnnotation={addAnnotation}
                 onUpdateAnnotation={updateAnnotation}
+                onDeleteAnnotation={deleteAnnotation}
                 selectedId={selectedId}
                 onSelectAnnotation={handleSelectAnnotation}
                 expandCanvas={true}
                 connectorColor={color}
                 connectorStyle={connectorStyle}
                 connectorThickness={connectorThickness}
+                showLabelNumbers={true}
+                title={title}
+                onUpdateTitle={handleUpdateTitle}
                 svgRef={svgRef}
                 containerRef={containerRef}
+                autoFocusTitle={title.startsWith('Untitled Project') || !title}
+                onBack={handleBackToGallery} // Pass back button handler
               />
-            </div>
-          </div>
-        )}
-        {!currentImage && (
-          <div
-            ref={uploadRef}
-            tabIndex={0}
-            className={`border border-gray-200 rounded-3xl p-8 bg-white shadow-2xl w-full max-w-xl flex flex-col items-center justify-center mt-8 transition-all duration-200 outline-none ${isDragActive ? 'ring-4 ring-blue-300 border-blue-400 bg-blue-50' : ''}`}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDragEnd={handleDragLeave}
-          >
-            <label className="flex flex-col items-center w-full cursor-pointer">
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={e => {
-                  if (e.target.files && e.target.files[0]) handleImageFile(e.target.files[0]);
-                }}
-              />
-              <button
-                type="button"
-                className="px-8 py-3 bg-blue-600 text-white rounded-full shadow hover:bg-blue-700 transition text-lg font-semibold mb-2"
-                onClick={() => (document.querySelector('input[type=file]') as HTMLInputElement)?.click()}
-              >
-                Click to Upload or Drop/Paste Image
-              </button>
-              <span className="text-gray-400 text-sm mt-2">or drag & drop / paste an image here</span>
-            </label>
-            {isDragActive && (
-              <div className="absolute inset-0 bg-blue-100/60 rounded-3xl border-4 border-blue-400 flex items-center justify-center pointer-events-none z-10">
-                <span className="text-blue-700 text-lg font-semibold">Drop image to upload</span>
-              </div>
             )}
-          </div>
-        )}
-        {/* Existing loading and error UI */}
-        {imageLoading && (
-          <div className="flex flex-col items-center justify-center py-8">
-            <div className="w-12 h-12 border-4 border-blue-300 border-t-blue-600 rounded-full animate-spin mb-2"></div>
-            <div className="text-blue-700 font-medium">Loading image...</div>
-          </div>
-        )}
-        {imageError && (
-          <div className="flex flex-col items-center justify-center py-4">
-            <div className="text-red-600 font-semibold">{imageError}</div>
-          </div>
-        )}
-      </main>
+          </Box>
+        </Box>
+      )}
+      
       {/* Fixed bottom toolbar, only when image is loaded */}
       {currentImage && (
-        <div className="w-full max-w-5xl px-4 pb-4">
+        <Box sx={{ width: '100%', maxWidth: '100vw', px: 4, pb: 4, position: 'fixed', bottom: 0, left: 0, zIndex: 10 }}>
           <Toolbar
             selectedTool={selectedTool}
             onSelectTool={setSelectedTool}
@@ -336,17 +396,18 @@ function App() {
             onRedo={redo}
             onClearAll={clearAnnotations}
             onExport={handleExport}
-            onClearImage={handleClearImage}
+            onClearImage={handleBackToGallery}
             exportFormat={exportFormat}
             onExportFormatChange={setExportFormat}
             className=""
           />
-        </div>
+        </Box>
       )}
+      
       <footer className="w-full py-4 text-center text-gray-400 text-xs border-t border-gray-100 mt-8">
         Created by Sukha
       </footer>
-    </div>
+    </Box>
   );
 }
 

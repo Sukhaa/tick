@@ -2,6 +2,10 @@
 
 An application for breakdown and labeling of vizzs or any image.
 
+## 🚀 Live Demo
+
+[https://sukhaa.github.io/tick/](https://sukhaa.github.io/tick/)
+
 ## Features
 
 - **Effortless Image Upload**: Support for JPG, PNG, and SVG formats
@@ -11,14 +15,17 @@ An application for breakdown and labeling of vizzs or any image.
   - Text labels with color customization
 - **Smart Alignment**: Automatic alignment for annotations and notes
 - **Dynamic Side Panel**: Auto-formatted notes linked to visual markers
-- **Clean UI**: Modern, uncluttered interface following UX best practices
+- **Color Palette Extraction**: Extracts and displays the most used colors in the image
+- **Clean UI**: Modern, uncluttered interface using MUI (Material UI)
+- **Local Project Storage**: Uses IndexedDB for per-browser project storage (no backend required)
 
 ## Tech Stack
 
 - **Frontend**: React.js with TypeScript
-- **Styling**: Tailwind CSS
+- **UI**: MUI (Material UI)
 - **Image Processing**: HTML Canvas API
 - **State Management**: React Hooks (useState, useCallback)
+- **Storage**: IndexedDB (per-browser)
 
 ## Project Structure
 
@@ -29,7 +36,7 @@ src/
 ├── types/         # TypeScript type definitions
 ├── utils/         # Utility functions
 ├── App.tsx        # Main application component
-└── index.css      # Global styles with Tailwind
+└── index.css      # Global styles
 ```
 
 ## Getting Started
@@ -41,23 +48,34 @@ src/
 
 ### Installation
 
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd image-annotation-app
-   ```
+```bash
+git clone https://github.com/Sukhaa/tick.git
+cd tick/image-annotation-app
+npm install
+npm run dev
+```
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+Open your browser and navigate to [http://localhost:5173](http://localhost:5173)
 
-3. Start the development server:
-   ```bash
-   npm run dev
-   ```
+## Deployment (GitHub Pages)
 
-4. Open your browser and navigate to `http://localhost:5173`
+1. Set `base: '/tick/'` in `vite.config.js`
+2. Install gh-pages:
+   ```bash
+   npm install --save-dev gh-pages
+   ```
+3. Add to `package.json`:
+   ```json
+   "scripts": {
+     "predeploy": "npm run build",
+     "deploy": "gh-pages -d dist"
+   }
+   ```
+4. Deploy:
+   ```bash
+   npm run deploy
+   ```
+5. Visit: [https://sukhaa.github.io/tick/](https://sukhaa.github.io/tick/)
 
 ## Usage
 
@@ -92,4 +110,4 @@ src/
 
 ## License
 
-This project is licensed under the MIT License.
+MIT

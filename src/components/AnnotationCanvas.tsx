@@ -1,6 +1,10 @@
 import React, { useRef, useState, RefObject, useCallback, useEffect } from 'react';
 import { ToolType } from './Toolbar';
 import { Annotation } from '../types/annotation';
+import { Card, CardContent, Box, Typography, Button, IconButton, Stack, Paper } from '@mui/material';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import CheckIcon from '@mui/icons-material/Check';
+import Tooltip from '@mui/material/Tooltip';
 
 interface AnnotationCanvasProps {
   imageUrl: string;
@@ -11,6 +15,7 @@ interface AnnotationCanvasProps {
   annotations: Annotation[];
   onAddAnnotation: (annotation: Omit<Annotation, 'id' | 'number'>) => Annotation;
   onUpdateAnnotation: (id: string, updates: Partial<Annotation>) => void;
+  onDeleteAnnotation?: (id: string) => void;
   selectedId: string | null;
   onSelectAnnotation: (id: string | null) => void;
   expandCanvas?: boolean;
@@ -18,8 +23,12 @@ interface AnnotationCanvasProps {
   connectorStyle?: 'solid' | 'dashed' | 'dotted';
   connectorThickness?: number;
   showLabelNumbers?: boolean;
+  title?: string;
+  onUpdateTitle?: (title: string) => void;
   svgRef?: React.RefObject<SVGSVGElement | null>;
   containerRef?: React.RefObject<HTMLDivElement | null>;
+  autoFocusTitle?: boolean;
+  onBack?: () => void; // Add back button handler
 }
 
 interface Point {
@@ -36,6 +45,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   annotations,
   onAddAnnotation,
   onUpdateAnnotation,
+  onDeleteAnnotation,
   selectedId,
   onSelectAnnotation,
   expandCanvas = false,
@@ -43,8 +53,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   connectorStyle = 'dashed',
   connectorThickness = 2,
   showLabelNumbers = false,
+  title = '',
+  onUpdateTitle,
   svgRef: externalSvgRef,
   containerRef: externalContainerRef,
+  autoFocusTitle = false,
+  onBack,
 }) => {
   console.log('AnnotationCanvas props:', { imageUrl, imageWidth, imageHeight });
   const [drawing, setDrawing] = useState(false);
@@ -61,6 +75,15 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const labelTextRefs = useRef({});
+  
+  // Title editing state
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editingTitleText, setEditingTitleText] = useState(title);
+  const [titleInputPos, setTitleInputPos] = useState<{ x: number; y: number; width?: number; height?: number } | null>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const titleTextRef = useRef<SVGTextElement>(null);
+  const [showTitleWarning, setShowTitleWarning] = useState(false);
+  
   // Add a ref for the container div
   const internalContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = externalContainerRef || internalContainerRef;
@@ -352,30 +375,36 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       setTimeout(() => {
         setEditingLabelId(newAnnotation!.id);
         setEditingText('');
-        // Robustly wait for the label text element to exist, then set inputPos
-        let attempts = 0;
-        const maxAttempts = 10;
-        function trySetInputPos() {
-          const container = containerRef.current;
-          const labelEl = labelTextRefs.current[newAnnotation!.id];
-          if (container && labelEl) {
-            const containerRect = container.getBoundingClientRect();
-            const labelRect = labelEl.getBoundingClientRect();
-            setInputPos({
-              x: labelRect.left - containerRect.left,
-              y: labelRect.top - containerRect.top,
-              width: labelRect.width,
-              height: labelRect.height
-            });
-            setTimeout(() => {
-              textareaRef.current?.focus();
-            }, 0);
-          } else if (attempts < maxAttempts) {
-            attempts++;
-            setTimeout(trySetInputPos, 30);
-          }
+        
+        // Use the same logic as handleLabelClick to position the edit box inline with the label
+        const labelEl = labelTextRefs.current[newAnnotation!.id];
+        const container = containerRef.current;
+        if (container && labelEl) {
+          const containerRect = container.getBoundingClientRect();
+          const labelRect = labelEl.getBoundingClientRect();
+          setInputPos({
+            x: labelRect.left - containerRect.left,
+            y: labelRect.top - containerRect.top,
+            width: labelRect.width,
+            height: labelRect.height
+          });
+        } else {
+          // Fallback: calculate approximate position based on annotation
+          const center = getAnnotationCenter(newAnnotation);
+          const isLeft = center.x < imageWidth / 2 + imageX;
+          const labelBoxX = isLeft ? labelEdgeBuffer : svgWidth - 180 - labelEdgeBuffer;
+          const labelBoxY = center.y - 20; // Approximate vertical position
+          setInputPos({
+            x: labelBoxX,
+            y: labelBoxY,
+            width: 180,
+            height: 40
+          });
         }
-        trySetInputPos();
+        
+        setTimeout(() => {
+          textareaRef.current?.focus();
+        }, 0);
       }, 100);
     }
     
@@ -444,7 +473,27 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const handleLabelClick = (ann: Annotation, x: number, y: number) => {
     setEditingLabelId(ann.id);
     setEditingText(ann.text || '');
-    setInputPos({ x, y });
+    
+    // Get the label element and container to calculate exact position
+    const labelEl = labelTextRefs.current[ann.id];
+    const container = containerRef.current;
+    
+    if (container && labelEl) {
+      const containerRect = container.getBoundingClientRect();
+      const labelRect = labelEl.getBoundingClientRect();
+      
+      // Calculate position relative to container
+      setInputPos({
+        x: labelRect.left - containerRect.left,
+        y: labelRect.top - containerRect.top,
+        width: labelRect.width,
+        height: labelRect.height
+      });
+    } else {
+      // Fallback to approximate position
+      setInputPos({ x, y });
+    }
+    
     setTimeout(() => {
       textareaRef.current?.focus();
     }, 0);
@@ -459,6 +508,61 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     setEditingText('');
     setInputPos(null);
   };
+
+  // Handle title click for editing
+  const handleTitleClick = () => {
+    if (titleTextRef.current && containerRef.current) {
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const titleRect = titleTextRef.current.getBoundingClientRect();
+      setTitleInputPos({
+        x: titleRect.left - containerRect.left,
+        y: titleRect.top - containerRect.top,
+        width: titleRect.width,
+        height: titleRect.height
+      });
+    }
+    setEditingTitle(true);
+    setEditingTitleText(title);
+    setTimeout(() => {
+      titleInputRef.current?.focus();
+    }, 0);
+  };
+
+  // Handle title edit commit
+  const commitTitleEdit = () => {
+    if (onUpdateTitle) {
+      onUpdateTitle(editingTitleText);
+    } else {
+      setLocalTitle(editingTitleText);
+    }
+    setEditingTitle(false);
+    setEditingTitleText('');
+    setTitleInputPos(null);
+  };
+
+  // Handle annotation deletion
+  const handleDeleteAnnotation = (id: string) => {
+    if (onDeleteAnnotation) {
+      onDeleteAnnotation(id);
+      onSelectAnnotation(null);
+    }
+  };
+
+  // Handle keyboard events for deletion
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle delete/backspace when not editing text
+      if (editingLabelId || editingTitle) return;
+      
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+        e.preventDefault();
+        handleDeleteAnnotation(selectedId);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [selectedId, editingLabelId, editingTitle, onDeleteAnnotation]);
 
   const boxWidth = 240; // was 180
   const boxHeight = 64; // was 48
@@ -629,26 +733,24 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     return labelRenderList.map((info) => {
       const { ann, lines, height, y, isLeft } = info;
       // Calculate label box dimensions for this label
-      const labelBoxWidth = Math.max(180, lines.reduce((max, line) => Math.max(max, line.length), 0) * labelFontSize * 0.6 + 24); // 24px padding
+      const minBoxWidth = isLeft ? 180 : 100;
+      const labelBoxWidth = Math.max(minBoxWidth, lines.reduce((max, line) => Math.max(max, line.length), 0) * labelFontSize * 0.6 + 24); // 24px padding
       const labelBoxHeight = height;
       // Label box position (top left)
       const labelBoxY = y;
       let labelBoxX: number;
       if (isLeft) {
-        labelBoxX = labelBuffer;
+        labelBoxX = labelEdgeBuffer;
       } else {
-        // Always place right label as close as possible to image, unless it would overflow SVG
-        const minX = imageWidth + imageX + labelBuffer;
-        const maxX = svgWidth - labelBoxWidth - sidebarWidth;
-        labelBoxX = Math.min(minX, maxX);
+        labelBoxX = svgWidth - labelBoxWidth - labelEdgeBuffer;
       }
-      const safeGap = 16; // px, space between label box edge and text
+      const safeGap = isLeft ? 16 : 8; // px, less gap for right labels
       // Calculate width of the longest line of text for this label
       const longestLine = lines.reduce((max, line) => line.length > max.length ? line : max, '');
       const labelTextWidth = Math.max(labelFontSize * 0.6 * longestLine.length, 40);
       // For both left and right labels, set labelTextRenderX appropriately
       const labelTextRenderX = isLeft
-        ? labelBuffer + safeGap
+        ? labelEdgeBuffer + safeGap
         : labelBoxX + labelBoxWidth - safeGap;
       // Connector endpoint: at the nearest edge of the label text
       const connectorEndX = isLeft
@@ -750,11 +852,24 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
               fontSize={labelFontSize}
               fontWeight={isSelected ? 'bold' : 'normal'}
               alignmentBaseline="hanging"
-              style={{ cursor: tool === 'pointer' ? 'move' : 'pointer', userSelect: 'none', fontFamily: 'Trebuchet MS, Inter, Segoe UI, Helvetica Neue, Arial, sans-serif' }}
+              style={{ 
+                cursor: tool === 'pointer' ? 'move' : 'pointer', 
+                userSelect: 'none', 
+                fontFamily: 'Trebuchet MS, Inter, Segoe UI, Helvetica Neue, Arial, sans-serif',
+                transition: 'fill 0.2s ease'
+              }}
               onMouseDown={e => handleLabelMouseDown(e, ann, labelBadgeX, labelBadgeY)}
               onClick={e => {
                 onSelectAnnotation(ann.id);
                 handleLabelClick(ann, labelBadgeX, labelBadgeY);
+              }}
+              onMouseEnter={e => {
+                if (tool === 'pointer') return;
+                e.currentTarget.style.fill = '#2563eb';
+              }}
+              onMouseLeave={e => {
+                if (tool === 'pointer') return;
+                e.currentTarget.style.fill = (ann.text && ann.text.trim()) ? '#222' : '#bbb';
               }}
             >
               {lines.map((line, i) => (
@@ -769,9 +884,9 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     });
   };
 
-  // Render resize handles for selected annotation
+  // Render resize handles and delete button for selected annotation
   const renderResizeHandles = (ann: Annotation, isSelected: boolean) => {
-    if (!isSelected || (ann.type !== 'rectangle' && ann.type !== 'circle')) return null;
+    if (!isSelected) return null;
     
     const x = ann.position.x + imageX;
     const y = ann.position.y + imageY;
@@ -779,34 +894,78 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     const height = ann.size.height;
     const handleSize = 8;
     
-    const handles = [
-      { x: x, y: y, corner: 'nw' },
-      { x: x + width / 2, y: y, corner: 'n' },
-      { x: x + width, y: y, corner: 'ne' },
-      { x: x + width, y: y + height / 2, corner: 'e' },
-      { x: x + width, y: y + height, corner: 'se' },
-      { x: x + width / 2, y: y + height, corner: 's' },
-      { x: x, y: y + height, corner: 'sw' },
-      { x: x, y: y + height / 2, corner: 'w' },
-    ];
+    const elements: React.ReactNode[] = [];
     
-    return handles.map((handle) => (
-      <rect
-        key={`handle-${handle.corner}`}
-        x={handle.x - handleSize / 2}
-        y={handle.y - handleSize / 2}
-        width={handleSize}
-        height={handleSize}
-        fill="#2563eb"
-        stroke="#fff"
-        strokeWidth={2}
-        style={{ cursor: 'pointer' }}
-        onMouseDown={(e) => {
-          e.stopPropagation();
-          setResizing({ id: ann.id, corner: handle.corner });
-        }}
-      />
-    ));
+    // Add resize handles for rectangle and circle
+    if (ann.type === 'rectangle' || ann.type === 'circle') {
+      const handles = [
+        { x: x, y: y, corner: 'nw' },
+        { x: x + width / 2, y: y, corner: 'n' },
+        { x: x + width, y: y, corner: 'ne' },
+        { x: x + width, y: y + height / 2, corner: 'e' },
+        { x: x + width, y: y + height, corner: 'se' },
+        { x: x + width / 2, y: y + height, corner: 's' },
+        { x: x, y: y + height, corner: 'sw' },
+        { x: x, y: y + height / 2, corner: 'w' },
+      ];
+      
+      handles.forEach((handle) => {
+        elements.push(
+          <rect
+            key={`handle-${handle.corner}`}
+            x={handle.x - handleSize / 2}
+            y={handle.y - handleSize / 2}
+            width={handleSize}
+            height={handleSize}
+            fill="#2563eb"
+            stroke="#fff"
+            strokeWidth={2}
+            style={{ cursor: 'pointer' }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              setResizing({ id: ann.id, corner: handle.corner });
+            }}
+          />
+        );
+      });
+    }
+    
+    // Add delete button for all annotation types
+    const deleteButtonSize = 20;
+    const deleteButtonX = x + width + 10;
+    const deleteButtonY = y - 10;
+    
+    elements.push(
+      <g key="delete-button" style={{ cursor: 'pointer' }}>
+        {/* Delete button background */}
+        <circle
+          cx={deleteButtonX}
+          cy={deleteButtonY}
+          r={deleteButtonSize}
+          fill="#ef4444"
+          stroke="#fff"
+          strokeWidth={2}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            handleDeleteAnnotation(ann.id);
+          }}
+        />
+        {/* Delete X symbol */}
+        <text
+          x={deleteButtonX}
+          y={deleteButtonY + 6}
+          textAnchor="middle"
+          fill="#fff"
+          fontSize={14}
+          fontWeight="bold"
+          style={{ userSelect: 'none', pointerEvents: 'none' }}
+        >
+          ×
+        </text>
+      </g>
+    );
+    
+    return elements;
   };
 
   // Render existing annotations
@@ -905,8 +1064,29 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   
   // Add padding above the highest label and below the lowest label
   const labelPadding = 40; // px, increased for better spacing
-  const topMargin = Math.max(labelPadding, imageHeight / 30);
-  const bottomMargin = Math.max(labelPadding, imageHeight / 15, maxLabelY - imageHeight / 2 + labelPadding);
+  
+  // Calculate minimum space needed for labels and title
+  const titleHeight = 80; // Space needed for title (increased)
+  const minTopSpace = Math.max(labelPadding + titleHeight, imageHeight / 30 + titleHeight);
+  const minBottomSpace = Math.max(labelPadding, imageHeight / 15, maxLabelY - imageHeight / 2 + labelPadding);
+  
+  // Calculate total available height (assuming 80vh max height)
+  const maxAvailableHeight = 800; // 80vh equivalent
+  const totalLabelSpace = minTopSpace + minBottomSpace;
+  const availableSpace = maxAvailableHeight - imageHeight;
+  
+  // Calculate margins to center the image
+  let topMargin, bottomMargin;
+  if (availableSpace >= totalLabelSpace) {
+    // If we have enough space, center the image with equal margins
+    const extraSpace = availableSpace - totalLabelSpace;
+    topMargin = minTopSpace + extraSpace / 2;
+    bottomMargin = minBottomSpace + extraSpace / 2;
+  } else {
+    // If not enough space, use minimum required margins
+    topMargin = minTopSpace;
+    bottomMargin = minBottomSpace;
+  }
 
   // --- Begin dynamic side margin calculation ---
   // Estimate the width of the longest label line on each side after word wrapping
@@ -934,59 +1114,31 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const maxLabelFontSize = 28;
   const labelFontSize = Math.max(minLabelFontSize, Math.min(maxLabelFontSize, Math.round(imageHeight / 35)));
   const approxCharWidth = labelFontSize * 0.6; // More accurate: ~0.6x font size for most fonts
-  const labelBuffer = 40; // px, buffer between label and image
-  // Left labels
+  // Define leftLabels and rightLabels before using them
   const leftLabels = annotations.filter(ann => {
     const center = ann.position.x + (ann.size?.width || 0) / 2;
     return center < imageWidth / 2;
   });
-  const maxLeftLineLen = getMaxLineLength(leftLabels);
-  const maxLeftLabelWidth = maxLeftLineLen * approxCharWidth;
+  const rightLabels = annotations.filter(ann => {
+    const center = ann.position.x + (ann.size?.width || 0) / 2;
+    return center >= imageWidth / 2;
+  });
   // Calculate max label box width for left and right labels
   const maxLeftLabelBoxWidth = leftLabels.length > 0 ? Math.max(...leftLabels.map(ann => {
     const lines = getLabelWrappedLines(ann.text || 'Add note...');
     return Math.max(180, lines.reduce((max, line) => Math.max(max, line.length), 0) * approxCharWidth + 24);
   })) : 0;
-  // Right labels
-  const rightLabels = annotations.filter(ann => {
-    const center = ann.position.x + (ann.size?.width || 0) / 2;
-    return center >= imageWidth / 2;
-  });
-  const maxRightLineLen = getMaxLineLength(rightLabels);
-  const maxRightLabelWidth = maxRightLineLen * approxCharWidth;
-  // maxRightLabelBoxWidth is already calculated in renderLabelsAndConnectors, so use the same logic here if needed
-  const sidebarWidth = 64; // px, fixed width for sidebar UI
-  // For left labels, calculate the leftmost X of the text
-  let minLeftTextX = 0;
-  leftLabels.forEach(ann => {
+  const maxRightLabelBoxWidth = rightLabels.length > 0 ? Math.max(...rightLabels.map(ann => {
     const lines = getLabelWrappedLines(ann.text || 'Add note...');
-    const labelBoxWidth = Math.max(180, lines.reduce((max, line) => Math.max(max, line.length), 0) * approxCharWidth + 24);
-    const safeGap = 16;
-    const longestLine = lines.reduce((max, line) => line.length > max.length ? line : max, '');
-    const labelTextWidth = Math.max(labelFontSize * 0.6 * longestLine.length, 40);
-    // labelBoxX is labelBuffer
-    const leftTextX = labelBuffer + safeGap;
-    // The left edge of the text is leftTextX
-    if (minLeftTextX === 0 || leftTextX < minLeftTextX) minLeftTextX = leftTextX;
-  });
-  // Add buffer
-  const leftMargin = Math.max(leftLabels.length > 0 ? maxLeftLabelBoxWidth + labelBuffer : labelBuffer, minLeftTextX + 24);
-  // For right labels, calculate the rightmost X of the text, assuming labelBoxX is always at imageX + imageWidth + labelBuffer
-  let maxRightTextX = imageWidth + leftMargin; // start with image right edge
-  rightLabels.forEach(ann => {
-    const lines = getLabelWrappedLines(ann.text || 'Add note...');
-    const labelBoxWidth = Math.max(180, lines.reduce((max, line) => Math.max(max, line.length), 0) * approxCharWidth + 24);
-    const safeGap = 16;
-    const longestLine = lines.reduce((max, line) => line.length > max.length ? line : max, '');
-    const labelTextWidth = Math.max(labelFontSize * 0.6 * longestLine.length, 40);
-    const labelBoxX = leftMargin + imageWidth + labelBuffer; // always as close as possible
-    const rightTextX = labelBoxX + labelBoxWidth - safeGap + labelTextWidth;
-    if (rightTextX > maxRightTextX) maxRightTextX = rightTextX;
-  });
-  // Add sidebar and buffer
-  const rightMargin = Math.max((rightLabels.length > 0 ? maxRightLabelWidth + labelBuffer : labelBuffer) + sidebarWidth, maxRightTextX - (leftMargin + imageWidth) + sidebarWidth + 24);
+    return Math.max(100, lines.reduce((max, line) => Math.max(max, line.length), 0) * approxCharWidth + 24);
+  })) : 0;
+  // Use a single buffer for both left and right edges
+  const labelEdgeBuffer = 40; // px, buffer from both edges
+  // Set leftMargin and rightMargin to fit the widest label box plus buffer
+  const leftMargin = maxLeftLabelBoxWidth + labelEdgeBuffer;
+  const rightMargin = maxRightLabelBoxWidth + labelEdgeBuffer;
   const svgWidth = leftMargin + imageWidth + rightMargin;
-  const svgHeight = imageHeight + topMargin + bottomMargin;
+  const svgHeight = imageHeight + topMargin;
   const imageX = leftMargin;
   const imageY = topMargin;
 
@@ -1005,6 +1157,107 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const handleZoomIn = () => setZoom(z => Math.min(z + 0.2, 4));
   const handleZoomOut = () => setZoom(z => Math.max(z - 0.2, 0.2));
   const handleZoomReset = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
+
+  // Add state for extracted colors and copied color
+  const [topColors, setTopColors] = useState<string[]>([]);
+  const [copiedColor, setCopiedColor] = useState<string | null>(null);
+
+  // Extract top colors when imageUrl changes
+  useEffect(() => {
+    if (!imageUrl) return;
+    const img = new window.Image();
+    img.crossOrigin = 'Anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0, img.width, img.height);
+      const data = ctx.getImageData(0, 0, img.width, img.height).data;
+      const colorCount: Record<string, number> = {};
+      for (let i = 0; i < data.length; i += 4) {
+        // Ignore fully transparent pixels
+        if (data[i + 3] < 128) continue;
+        // Reduce color depth for grouping (quantization)
+        const r = Math.round(data[i] / 32) * 32;
+        const g = Math.round(data[i + 1] / 32) * 32;
+        const b = Math.round(data[i + 2] / 32) * 32;
+        const hex = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+        colorCount[hex] = (colorCount[hex] || 0) + 1;
+      }
+      // Sort by frequency and take top 40 as candidates
+      const candidates = Object.entries(colorCount)
+        .sort((a, b) => b[1] - a[1])
+        .map(([hex]) => hex)
+        .filter(hex => hex !== '#ffffff' && hex !== '#000000')
+        .slice(0, 40);
+
+      // Helper: hex to HSL
+      function hexToHsl(hex) {
+        let r = 0, g = 0, b = 0;
+        if (hex.length === 7) {
+          r = parseInt(hex.slice(1, 3), 16) / 255;
+          g = parseInt(hex.slice(3, 5), 16) / 255;
+          b = parseInt(hex.slice(5, 7), 16) / 255;
+        }
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h = 0, s = 0, l = (max + min) / 2;
+        if (max !== min) {
+          const d = max - min;
+          s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+          switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+          }
+          h /= 6;
+        }
+        return { h: h * 360, s, l };
+      }
+
+      // Greedy selection for max hue diversity
+      const selected: string[] = [];
+      const hslCandidates = candidates.map(hex => ({ hex, hsl: hexToHsl(hex) }));
+      if (hslCandidates.length > 0) {
+        // Start with the most frequent
+        selected.push(hslCandidates[0].hex);
+        while (selected.length < 12 && hslCandidates.length > 0) {
+          let bestIdx = -1;
+          let bestMinDist = -1;
+          for (let i = 0; i < hslCandidates.length; ++i) {
+            if (selected.includes(hslCandidates[i].hex)) continue;
+            // Compute min hue distance to already selected
+            const hue = hslCandidates[i].hsl.h;
+            let minDist = 360;
+            for (const sel of selected) {
+              const selHue = hslCandidates.find(c => c.hex === sel)?.hsl.h ?? 0;
+              const d = Math.abs(hue - selHue);
+              minDist = Math.min(minDist, Math.min(d, 360 - d));
+            }
+            if (minDist > bestMinDist) {
+              bestMinDist = minDist;
+              bestIdx = i;
+            }
+          }
+          if (bestIdx !== -1) {
+            selected.push(hslCandidates[bestIdx].hex);
+          } else {
+            break;
+          }
+        }
+      }
+      setTopColors(selected.slice(0, 12));
+    };
+    img.src = imageUrl;
+  }, [imageUrl]);
+
+  // Copy color to clipboard
+  const handleCopyColor = (hex: string) => {
+    navigator.clipboard.writeText(hex);
+    setCopiedColor(hex);
+    setTimeout(() => setCopiedColor(null), 1200);
+  };
 
   if (!imageWidth || !imageHeight || imageWidth < 2 || imageHeight < 2) {
     return <div className="w-full h-64 flex items-center justify-center text-gray-400">No image loaded</div>;
@@ -1035,139 +1288,359 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     }
   }, [editingLabelId]);
 
+  // Update editing title text when title prop changes
+  useEffect(() => {
+    setEditingTitleText(title);
+  }, [title]);
+
+  // Auto-focus title input if requested
+  useEffect(() => {
+    if (autoFocusTitle && !editingTitle) {
+      setEditingTitle(true);
+      setEditingTitleText(title);
+      setTimeout(() => {
+        titleInputRef.current?.focus();
+      }, 100);
+    }
+  }, [autoFocusTitle, editingTitle, title]);
+
+  // Add localTitle state at the top, after extracting title from props
+  const [localTitle, setLocalTitle] = useState(title);
+
+  // Use localTitle as fallback for title
+  const displayTitle = typeof title === 'string' && title.length > 0 ? title : localTitle;
+
+  // Calculate dynamic card width based on image width and margin for labels
+  const cardMaxWidth = Math.min((imageWidth || 600) + 120, window.innerWidth * 0.98);
+
+  // --- Improved: Recalculate title input position on zoom/pan/title change ---
+  useEffect(() => {
+    if (editingTitle && titleTextRef.current && containerRef.current) {
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const titleRect = titleTextRef.current.getBoundingClientRect();
+      setTitleInputPos({
+        x: titleRect.left - containerRect.left,
+        y: titleRect.top - containerRect.top,
+        width: titleRect.width,
+        height: titleRect.height
+      });
+    }
+  }, [editingTitle, title, imageWidth, imageHeight]);
+  // --- Improved: Recalculate label input position on zoom/pan/label text change ---
+  useEffect(() => {
+    if (editingLabelId && labelTextRefs.current[editingLabelId] && containerRef.current) {
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const labelRect = labelTextRefs.current[editingLabelId].getBoundingClientRect();
+      setInputPos({
+        x: labelRect.left - containerRect.left,
+        y: labelRect.top - containerRect.top,
+        width: labelRect.width,
+        height: labelRect.height
+      });
+    }
+  }, [editingLabelId, editingText, annotations, imageWidth, imageHeight]);
+
+  // Add state for editing the card header title
+  const [editingHeaderTitle, setEditingHeaderTitle] = useState(false);
+  const [headerTitleText, setHeaderTitleText] = useState(title);
+
+  // Update headerTitleText when title prop changes
+  useEffect(() => { setHeaderTitleText(title); }, [title]);
+
+  // Handler to commit/cancel edit
+  const commitHeaderTitleEdit = () => {
+    setEditingHeaderTitle(false);
+    if (headerTitleText.trim() && onUpdateTitle) {
+      onUpdateTitle(headerTitleText.trim());
+    }
+  };
+  const cancelHeaderTitleEdit = () => {
+    setEditingHeaderTitle(false);
+    setHeaderTitleText(title);
+  };
+
+  // Modern MUI Card layout
   return (
-    <div ref={containerRef} className="relative w-full h-full flex items-center justify-center bg-white" style={{ minHeight: 400, minWidth: 400 }}>
-      <div
-        className="relative"
+    <>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 2, mb: 3, gap: 2 }}>
+        {/* Back button, perfectly aligned with project name */}
+        {onBack && (
+          <Tooltip title="Back to Gallery">
+            <IconButton onClick={onBack} color="primary" sx={{ mr: 2 }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M15 19l-7-7 7-7" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </IconButton>
+          </Tooltip>
+        )}
+        <Typography variant="h4" fontWeight={800} color="text.primary" sx={{ mr: 2 }}>
+          {editingHeaderTitle ? (
+            <input
+              value={headerTitleText}
+              onChange={e => setHeaderTitleText(e.target.value)}
+              onBlur={commitHeaderTitleEdit}
+              onKeyDown={e => {
+                if (e.key === 'Enter') commitHeaderTitleEdit();
+                if (e.key === 'Escape') cancelHeaderTitleEdit();
+              }}
+              style={{
+                fontSize: 32,
+                fontWeight: 800,
+                color: '#222',
+                fontFamily: 'Inter, Segoe UI, Helvetica Neue, Arial, sans-serif',
+                border: '2px solid #90caf9',
+                borderRadius: 8,
+                padding: '2px 16px',
+                minWidth: 120,
+                maxWidth: 400,
+              }}
+              autoFocus
+            />
+          ) : (
+            <span
+              style={{ cursor: 'pointer', userSelect: 'text' }}
+              onClick={() => setEditingHeaderTitle(true)}
+              title="Click to edit project name"
+            >
+              {title || 'Untitled Project'}
+            </span>
+          )}
+          <span style={{ fontWeight: 400, color: '#888', fontSize: 28, marginLeft: 16 }}>– VizAudit</span>
+        </Typography>
+      </Box>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', width: '100%', py: 2 }}>
+        <Card sx={{
+          maxWidth: cardMaxWidth,
+          width: '100%',
+          borderRadius: 4,
+          boxShadow: 8,
+          p: 2,
+          mx: 2,
+        }}>
+          <CardContent>
+            {/* Only color palette and controls in the card header */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.5, mr: 2 }}>
+                <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
+                  {topColors.slice(0, 6).map(hex => (
+                    <Tooltip key={hex} title={copiedColor === hex ? 'Copied!' : hex} arrow>
+                      <Box
+                        onClick={() => handleCopyColor(hex)}
+                        sx={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 2,
+                          background: hex,
+                          border: '2px solid #eee',
+                          cursor: 'pointer',
+                          boxShadow: copiedColor === hex ? '0 0 0 2px #90caf9' : undefined,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          position: 'relative',
+                          transition: 'box-shadow 0.2s',
+                        }}
+                      >
+                        {copiedColor === hex ? (
+                          <CheckIcon sx={{ color: '#2563eb', fontSize: 18 }} />
+                        ) : (
+                          <ContentCopyIcon sx={{ color: '#fff', fontSize: 16, opacity: 0.7 }} />
+                        )}
+                      </Box>
+                    </Tooltip>
+                  ))}
+                </Box>
+                <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1, mt: 0.5 }}>
+                  {topColors.slice(6, 12).map(hex => (
+                    <Tooltip key={hex} title={copiedColor === hex ? 'Copied!' : hex} arrow>
+                      <Box
+                        onClick={() => handleCopyColor(hex)}
+                        sx={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 2,
+                          background: hex,
+                          border: '2px solid #eee',
+                          cursor: 'pointer',
+                          boxShadow: copiedColor === hex ? '0 0 0 2px #90caf9' : undefined,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          position: 'relative',
+                          transition: 'box-shadow 0.2s',
+                        }}
+                      >
+                        {copiedColor === hex ? (
+                          <CheckIcon sx={{ color: '#2563eb', fontSize: 18 }} />
+                        ) : (
+                          <ContentCopyIcon sx={{ color: '#fff', fontSize: 16, opacity: 0.7 }} />
+                        )}
+                      </Box>
+                    </Tooltip>
+                  ))}
+                </Box>
+              </Box>
+              {/* Zoom controls and other tools remain here */}
+              <Stack direction="row" spacing={1}>
+                <Button size="small" variant="outlined" onClick={handleZoomOut}>-</Button>
+                <Button size="small" variant="outlined" onClick={handleZoomIn}>+</Button>
+                <Button size="small" variant="outlined" onClick={handleZoomReset}>Reset</Button>
+              </Stack>
+            </Box>
+            {/* Canvas area */}
+            <Paper elevation={2} sx={{ p: 2, borderRadius: 3, bgcolor: 'grey.50', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              <Box ref={containerRef} sx={{ position: 'relative', width: imageWidth, height: imageHeight, display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'auto', maxWidth: '100vw', maxHeight: '80vh' }}>
+      {/* SVG with transform */}
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+        width={svgWidth}
+        height={svgHeight}
+        className="cursor-crosshair"
         style={{
+          border: '1px solid #e5e7eb',
+          background: '#fff',
           maxWidth: '100%',
           maxHeight: '80vh',
-          overflow: 'auto',
-          position: 'relative',
-          background: '#fff',
+          transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
+          transformOrigin: 'center center',
+          transition: 'transform 0.2s',
+          display: 'block',
         }}
-        onWheel={e => {
-          if (e.ctrlKey) return; // Let browser handle pinch-to-zoom
-          e.preventDefault();
-          if (e.deltaY < 0) setZoom(z => Math.min(z + 0.1, 4));
-          else setZoom(z => Math.max(z - 0.1, 0.2));
-        }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleSvgMouseMove}
+        onMouseUp={handleSvgMouseUp}
       >
-        {/* Zoom controls at bottom right of visible area */}
-        <div style={{ position: 'absolute', bottom: '1rem', right: '1rem', zIndex: 10 }} className="flex flex-col gap-1 bg-white bg-opacity-80 rounded shadow p-1">
-          <button onClick={handleZoomIn} className="px-2 py-1 rounded hover:bg-blue-100 font-bold" title="Zoom In">+</button>
-          <button onClick={handleZoomOut} className="px-2 py-1 rounded hover:bg-blue-100 font-bold" title="Zoom Out">-</button>
-          <button onClick={handleZoomReset} className="px-2 py-1 rounded hover:bg-blue-100 font-bold" title="Reset Zoom">⟳</button>
-          <span className="text-xs text-gray-600 text-center">{Math.round(zoom * 100)}%</span>
-        </div>
-        {/* SVG with transform */}
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          width={svgWidth}
-          height={svgHeight}
-          className="cursor-crosshair"
-          style={{
-            border: '1px solid #e5e7eb',
-            background: '#fff',
-            maxWidth: '100%',
-            maxHeight: '80vh',
-            transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
-            transformOrigin: 'center center',
-            transition: 'transform 0.2s',
-            display: 'block',
-          }}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleSvgMouseMove}
-          onMouseUp={handleSvgMouseUp}
-        >
-          {/* Arrowhead marker definitions */}
-          <defs>
-            <marker
-              id="arrowhead"
-              markerWidth="10"
-              markerHeight="7"
-              refX="10"
-              refY="3.5"
-              orient="auto"
-              markerUnits="strokeWidth"
-            >
-              <polygon points="0 0, 10 3.5, 0 7" fill="#bbb" />
-            </marker>
-            <marker
-              id="arrowhead-selected"
-              markerWidth="10"
-              markerHeight="7"
-              refX="10"
-              refY="3.5"
-              orient="auto"
-              markerUnits="strokeWidth"
-            >
-              <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb" />
-            </marker>
-          </defs>
-          {/* SVG defs for label shadow */}
-          <defs>
-            <filter id="labelShadow" x="-10%" y="-10%" width="120%" height="120%">
-              <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.10" />
-            </filter>
-          </defs>
-          {/* Render the image centered in the expanded SVG */}
-          <image
-            href={imageUrl}
-            x={imageX}
-            y={imageY}
-            width={imageWidth}
-            height={imageHeight}
-            style={{ pointerEvents: 'none' }}
-          />
-          {renderLabelsAndConnectors()}
-          {renderAnnotations()}
-          {renderPreview()}
-        </svg>
-      </div>
+        {/* Arrowhead marker definitions */}
+        <defs>
+          <marker
+            id="arrowhead"
+            markerWidth="10"
+            markerHeight="7"
+            refX="10"
+            refY="3.5"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <polygon points="0 0, 10 3.5, 0 7" fill="#bbb" />
+          </marker>
+          <marker
+            id="arrowhead-selected"
+            markerWidth="10"
+            markerHeight="7"
+            refX="10"
+            refY="3.5"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb" />
+          </marker>
+        </defs>
+        {/* SVG defs for label shadow */}
+        <defs>
+          <filter id="labelShadow" x="-10%" y="-10%" width="120%" height="120%">
+            <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.10" />
+          </filter>
+        </defs>
+        
+        {/* Render title above the image */}
+        {!editingTitle && (
+          <text
+            ref={titleTextRef}
+            x={imageX + imageWidth / 2}
+            y={imageY - 40}
+            textAnchor="middle"
+            fill={displayTitle ? '#222' : '#bbb'}
+            fontSize={Math.max(40, Math.min(56, Math.round(imageWidth * 0.06)))}
+            fontWeight="bold"
+            style={{ 
+              cursor: 'pointer', 
+              userSelect: 'none', 
+              fontFamily: 'Trebuchet MS, Inter, Segoe UI, Helvetica Neue, Arial, sans-serif',
+                        pointerEvents: 'auto',
+                        zIndex: 2
+            }}
+            onClick={handleTitleClick}
+          >
+            {displayTitle || 'Click to add title...'}
+          </text>
+        )}
+        
+        {/* Render the image centered in the expanded SVG */}
+        <image
+          href={imageUrl}
+          x={imageX}
+          y={imageY}
+          width={imageWidth}
+          height={imageHeight}
+          style={{ pointerEvents: 'none' }}
+        />
+        {renderLabelsAndConnectors()}
+        {renderAnnotations()}
+        {renderPreview()}
+      </svg>
       {/* Inline label editing input */}
       {editingLabelId && inputPos && (
         <textarea
           ref={textareaRef}
           value={editingText}
           onChange={e => setEditingText(e.target.value)}
-          onBlur={e => { e.target.style.outline = 'none'; e.target.style.border = 'none'; e.target.style.borderRadius = '8px'; commitLabelEdit(); }}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              commitLabelEdit();
-            }
-            // Shift+Enter inserts a newline by default
-          }}
-          className="absolute z-10 resize-none"
+                    onBlur={commitLabelEdit}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitLabelEdit(); } if (e.key === 'Escape') setEditingLabelId(null); }}
           style={{
+                      position: 'absolute',
             left: inputPos.x,
             top: inputPos.y,
-            minWidth: 60,
-            width: inputPos.width || 'auto',
-            height: inputPos.height || 'auto',
-            fontSize: labelFontSize,
-            fontFamily: 'Trebuchet MS, Inter, Segoe UI, Helvetica Neue, Arial, sans-serif',
-            fontWeight: 'normal',
+                      width: inputPos.width,
+                      height: inputPos.height,
+                      fontSize: 16, // match SVG label font size
+                      fontWeight: 500,
             color: '#222',
-            outline: 'none',
-            border: 'none',
-            background: 'transparent',
-            boxShadow: 'none',
-            padding: 0,
-            margin: 0,
-            borderRadius: '8px',
-            lineHeight: 1.2,
-            transition: 'border 0.15s, border-radius 0.15s',
-            overflow: 'hidden',
+                      fontFamily: 'Trebuchet MS, Inter, Segoe UI, Helvetica Neue, Arial, sans-serif',
+                      background: 'rgba(255,255,255,0.95)',
+                      border: '2px solid #90caf9',
+                      borderRadius: 8,
+                      padding: '2px 8px',
+                      zIndex: 10,
             resize: 'none',
-            whiteSpace: 'pre',
-          }}
-          rows={Math.max(1, editingText.split('\n').length)}
-          onFocus={e => { e.target.style.outline = 'none'; e.target.style.border = '2px solid #2563eb'; e.target.style.borderRadius = '8px'; }}
-        />
-      )}
-    </div>
+                      boxSizing: 'border-box',
+                    }}
+                    autoFocus
+                  />
+                )}
+      {/* Inline title editing input */}
+      {editingTitle && titleInputPos && (
+        <input
+          ref={titleInputRef}
+          value={editingTitleText}
+          onChange={e => setEditingTitleText(e.target.value)}
+                    onBlur={commitTitleEdit}
+                    onKeyDown={e => { if (e.key === 'Enter') commitTitleEdit(); if (e.key === 'Escape') setEditingTitle(false); }}
+          style={{
+                      position: 'absolute',
+            left: titleInputPos.x,
+            top: titleInputPos.y,
+                      width: titleInputPos.width,
+                      height: titleInputPos.height,
+                      fontSize: 32, // match SVG title font size
+                      fontWeight: 800,
+            color: '#222',
+                      fontFamily: 'Inter, Segoe UI, Helvetica Neue, Arial, sans-serif',
+                      background: 'rgba(255,255,255,0.95)',
+                      border: '2px solid #90caf9',
+                      borderRadius: 8,
+                      padding: '2px 8px',
+                      zIndex: 10,
+                      boxSizing: 'border-box',
+                    }}
+                    autoFocus
+                  />
+                )}
+              </Box>
+            </Paper>
+            {/* Toolbar or annotation controls can go here, using MUI Buttons/IconButtons */}
+            {showTitleWarning && <div style={{color: 'red', fontWeight: 600, marginTop: 4}}>Please enter a project title before annotating.</div>}
+          </CardContent>
+        </Card>
+      </Box>
+    </>
   );
 }; 

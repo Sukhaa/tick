@@ -25,10 +25,22 @@ export interface Annotation {
 
 export interface ImageData {
   id: string;
-  file?: File;
   fileName?: string;
-  url: string;
   width: number;
   height: number;
   annotations: Annotation[];
+}
+
+export interface SavedProject {
+  id: string;
+  name: string;
+  fileName: string;
+  imageKey: string;
+  width: number;
+  height: number;
+  annotations: Annotation[];
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  thumbnailUrl?: string;
 } 

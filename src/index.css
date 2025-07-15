@@ -16,14 +16,12 @@ html, body, #root {
   min-height: 100vh;
 }
 
-/* Add a subtle shadow to the main content area */
 .main-content {
   box-shadow: 0 8px 32px 0 rgba(60,60,100,0.10), 0 1.5px 6px 0 rgba(0,0,0,0.06);
   border-radius: 2rem;
   background: #fff;
 }
 
-/* Style file input for modern look */
 input[type="file"]::file-selector-button {
   font-family: inherit;
   border-radius: 9999px;
@@ -39,29 +37,23 @@ input[type="file"]::file-selector-button:hover {
   background: #e0e7ff;
 }
 
-/* Add focus style for accessibility */
 :focus {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
 }
 
-/* Enhanced Toolbar Styles */
-
-/* Custom slider styling */
 .slider {
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
   cursor: pointer;
 }
-
 .slider::-webkit-slider-track {
   background: #e5e7eb;
   height: 8px;
   border-radius: 4px;
   border: none;
 }
-
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -74,20 +66,17 @@ input[type="file"]::file-selector-button:hover {
   cursor: pointer;
   transition: all 0.2s ease;
 }
-
 .slider::-webkit-slider-thumb:hover {
   background: #1d4ed8;
   transform: scale(1.1);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
-
 .slider::-moz-range-track {
   background: #e5e7eb;
   height: 8px;
   border-radius: 4px;
   border: none;
 }
-
 .slider::-moz-range-thumb {
   background: #2563eb;
   height: 20px;
@@ -98,25 +87,22 @@ input[type="file"]::file-selector-button:hover {
   cursor: pointer;
   transition: all 0.2s ease;
 }
-
 .slider::-moz-range-thumb:hover {
   background: #1d4ed8;
   transform: scale(1.1);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
-/* Toolbar animations */
 @keyframes fadeInUp {
   from {
     opacity: 0;
     transform: translateY(10px);
-  }
+}
   to {
     opacity: 1;
     transform: translateY(0);
   }
 }
-
 @keyframes scaleIn {
   from {
     opacity: 0;
@@ -127,32 +113,22 @@ input[type="file"]::file-selector-button:hover {
     transform: scale(1);
   }
 }
-
-/* Toolbar button hover effects */
 .toolbar-button {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-
 .toolbar-button:hover {
   transform: translateY(-2px);
 }
-
-/* Dropdown animations */
 .toolbar-dropdown {
   animation: fadeInUp 0.2s ease-out;
 }
-
-/* Active tool indicator animation */
 .active-tool-indicator {
   animation: scaleIn 0.2s ease-out;
 }
-
-/* Color picker enhancement */
 .color-picker-wrapper {
   position: relative;
   overflow: hidden;
 }
-
 .color-picker-wrapper::before {
   content: '';
   position: absolute;
@@ -164,32 +140,22 @@ input[type="file"]::file-selector-button:hover {
   transform: translateX(-100%);
   transition: transform 0.6s ease;
 }
-
 .color-picker-wrapper:hover::before {
   transform: translateX(100%);
 }
-
-/* Enhanced focus states */
 .toolbar-button:focus-visible {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
 }
 
-/* Smooth transitions for all interactive elements */
-* {
-  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 150ms;
-}
-
-/* Remove border from toolbar pill */
+/* Remove border from toolbar pill, but without !important */
 .fixed.left-1\/2.rounded-full,
 .flex.items-center.bg-white.rounded-full {
-  border: none !important;
-  outline: none !important;
-  box-shadow: 0 4px 24px 0 rgba(60,60,100,0.10), 0 1.5px 6px 0 rgba(0,0,0,0.06) !important;
-}
+  border: none;
+  outline: none;
+  box-shadow: 0 4px 24px 0 rgba(60,60,100,0.10), 0 1.5px 6px 0 rgba(0,0,0,0.06);
+  }
 
 .toolbar-group-separator {
   height: 48px;
@@ -197,15 +163,15 @@ input[type="file"]::file-selector-button:hover {
   margin: 0 24px;
   background: linear-gradient(180deg, #e0e0e0 0%, #bdbdbd 100%);
   border-radius: 8px;
-  opacity: 1 !important;
+  opacity: 1;
   display: inline-block;
 }
 
 .woosh-toolbar-bottom-override {
-  position: fixed !important;
-  left: 50% !important;
-  bottom: 32px !important;
-  top: auto !important;
-  transform: translateX(-50%) !important;
-  z-index: 9999 !important;
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  top: auto;
+  transform: translateX(-50%);
+  z-index: 9999;
 }

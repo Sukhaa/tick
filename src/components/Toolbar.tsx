@@ -44,7 +44,7 @@ const drawingTools: { type: ToolType; label: string; icon: React.ReactNode; shor
     label: 'Select & Move',
     icon: <NorthEastIcon fontSize="medium" />,
     shortcut: 'V',
-    description: 'Select and move shapes and labels'
+    description: 'Select and move shapes and labels. Press Delete to remove selected annotation.'
   },
   {
     type: 'rectangle',
