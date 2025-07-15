@@ -13,7 +13,7 @@ interface GalleryProps {
   onDeleteProject: (projectId: string) => void;
   onUploadNew: (file: File) => void;
   onExportProject: (project: SavedProject) => void;
-  updateProjectMetadata: (projectId: string, updates: Partial<SavedProject>) => Promise<void>;
+  updateProjectMetadata?: (projectId: string, updates: Partial<SavedProject>) => Promise<void>;
 }
 
 export const Gallery: React.FC<GalleryProps> = ({
@@ -71,7 +71,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   };
 
   const saveName = async (projectId: string) => {
-    if (editingText.trim()) {
+    if (editingText.trim() && updateProjectMetadata) {
       await updateProjectMetadata(projectId, { name: editingText });
     }
     setEditingName(null);
@@ -92,10 +92,13 @@ export const Gallery: React.FC<GalleryProps> = ({
     <Box sx={{ minHeight: '100vh', bgcolor: 'linear-gradient(135deg, #f7f7fa 0%, #e9e9f3 100%)', py: 6, fontFamily: 'Inter, Segoe UI, Helvetica Neue, Arial, sans-serif' }}>
       <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
         {/* Header */}
-        <Box sx={{ textAlign: 'center', mb: 6 }}>
-          <Typography variant="h3" fontWeight={800} color="text.primary" gutterBottom>
-            VizAudit Gallery
-          </Typography>
+        <Box sx={{ textAlign: 'center', mb: 6, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2, gap: 2 }}>
+            <img src="/VizAudit Logo.png" alt="VizAudit Logo" style={{ width: 56, height: 56, borderRadius: 12, marginRight: 16 }} />
+            <Typography variant="h3" fontWeight={800} color="text.primary" sx={{ fontFamily: 'Inter, Segoe UI, Helvetica Neue, Arial, sans-serif', letterSpacing: -1 }}>
+              VizAudit Gallery
+            </Typography>
+          </Box>
           <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 600, mx: 'auto', mb: 2 }}>
             Your saved annotation projects. Click on any project to continue working or upload a new image to start fresh.
           </Typography>

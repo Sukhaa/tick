@@ -334,50 +334,51 @@ function App() {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'gray.50' }}>
-      {showGallery ? (
-        <Gallery
-          projects={projects}
-          onSelectProject={handleSelectProject}
-          onDeleteProject={handleDeleteProject}
-          onUploadNew={handleImageFile}
-          onExportProject={handleExportProject}
-          updateProjectMetadata={updateProjectMetadata}
-        />
-      ) : (
-        <Box sx={{ width: '100%', maxWidth: '100vw', mx: 'auto', pt: 2 }}>
-          {/* Remove header row and spacers, move back button into AnnotationCanvas */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            {currentImage && (
-              <AnnotationCanvas
-                imageUrl={currentImage.url}
-                imageWidth={currentImage.width}
-                imageHeight={currentImage.height}
-                tool={selectedTool}
-                color={color}
-                annotations={annotations}
-                onAddAnnotation={addAnnotation}
-                onUpdateAnnotation={updateAnnotation}
-                onDeleteAnnotation={deleteAnnotation}
-                selectedId={selectedId}
-                onSelectAnnotation={handleSelectAnnotation}
-                expandCanvas={true}
-                connectorColor={color}
-                connectorStyle={connectorStyle}
-                connectorThickness={connectorThickness}
-                showLabelNumbers={true}
-                title={title}
-                onUpdateTitle={handleUpdateTitle}
-                svgRef={svgRef}
-                containerRef={containerRef}
-                autoFocusTitle={title.startsWith('Untitled Project') || !title}
-                onBack={handleBackToGallery} // Pass back button handler
-              />
-            )}
+    <Box sx={{ minHeight: '100vh', bgcolor: 'gray.50', display: 'flex', flexDirection: 'column' }}>
+      {/* Remove logo and app name from here; handled in Gallery.tsx header */}
+      <Box sx={{ flex: 1, width: '100%' }}>
+        {showGallery ? (
+          <Gallery
+            projects={projects}
+            onSelectProject={handleSelectProject}
+            onDeleteProject={handleDeleteProject}
+            onUploadNew={handleImageFile}
+            onExportProject={handleExportProject}
+          />
+        ) : (
+          <Box sx={{ width: '100%', maxWidth: '100vw', mx: 'auto', pt: 2 }}>
+            {/* Remove header row and spacers, move back button into AnnotationCanvas */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              {currentImage && (
+                <AnnotationCanvas
+                  imageUrl={currentImage.url}
+                  imageWidth={currentImage.width}
+                  imageHeight={currentImage.height}
+                  tool={selectedTool}
+                  color={color}
+                  annotations={annotations}
+                  onAddAnnotation={addAnnotation}
+                  onUpdateAnnotation={updateAnnotation}
+                  onDeleteAnnotation={deleteAnnotation}
+                  selectedId={selectedId}
+                  onSelectAnnotation={handleSelectAnnotation}
+                  expandCanvas={true}
+                  connectorColor={color}
+                  connectorStyle={connectorStyle}
+                  connectorThickness={connectorThickness}
+                  showLabelNumbers={true}
+                  title={title}
+                  onUpdateTitle={handleUpdateTitle}
+                  svgRef={svgRef}
+                  containerRef={containerRef}
+                  autoFocusTitle={title.startsWith('Untitled Project') || !title}
+                  onBack={handleBackToGallery} // Pass back button handler
+                />
+              )}
+            </Box>
           </Box>
-        </Box>
-      )}
-      
+        )}
+      </Box>
       {/* Fixed bottom toolbar, only when image is loaded */}
       {currentImage && (
         <Box sx={{ width: '100%', maxWidth: '100vw', px: 4, pb: 4, position: 'fixed', bottom: 0, left: 0, zIndex: 10 }}>
@@ -403,9 +404,12 @@ function App() {
           />
         </Box>
       )}
-      
-      <footer className="w-full py-4 text-center text-gray-400 text-xs border-t border-gray-100 mt-8">
-        Created by Sukha
+      {/* Modern centered footer with logo and branding */}
+      <footer style={{ width: '100%', padding: '24px 0 12px 0', textAlign: 'center', color: '#888', fontSize: 14, borderTop: '1px solid #eee', marginTop: 32, background: 'transparent' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+          <img src="/VizAudit Logo.png" alt="VizAudit Logo" style={{ width: 36, height: 36, borderRadius: 8, marginBottom: 4 }} />
+          <span>Created with <span style={{ color: '#e25555', fontWeight: 700 }}>&hearts;</span> by Sukha @ VizAudit</span>
+        </div>
       </footer>
     </Box>
   );
