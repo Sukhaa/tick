@@ -5,13 +5,14 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import DownloadIcon from '@mui/icons-material/Download';
 import SearchIcon from '@mui/icons-material/Search';
-import { Box, Grid, Card, CardContent, CardActions, Button, Typography, IconButton, Paper, Tooltip } from '@mui/material';
+import { Box, Card, CardContent, CardActions, Button, Typography, IconButton, Paper, Tooltip } from '@mui/material';
+import Grid from '@mui/system/Grid';
 
 interface GalleryProps {
-  projects: SavedProject[];
+  projects: SavedProject[]; // Now includes optional type and boardImages for board projects
   onSelectProject: (project: SavedProject) => void;
   onDeleteProject: (projectId: string) => void;
-  onUploadNew: (file: File) => void;
+  onUploadNew: (file: File | FileList) => void;
   onExportProject: (project: SavedProject) => void;
   updateProjectMetadata?: (projectId: string, updates: Partial<SavedProject>) => Promise<void>;
 }
@@ -45,7 +46,7 @@ export const Gallery: React.FC<GalleryProps> = ({
     e.preventDefault();
     setIsDragActive(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      onUploadNew(e.dataTransfer.files[0]);
+      onUploadNew(e.dataTransfer.files); // Pass the full FileList
     }
   };
 
@@ -60,8 +61,8 @@ export const Gallery: React.FC<GalleryProps> = ({
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      onUploadNew(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      onUploadNew(e.target.files); // Pass the full FileList
     }
   };
 
@@ -147,6 +148,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             ref={fileInputRef}
             type="file"
             accept="image/*"
+            multiple // Allow multiple image selection
             style={{ display: 'none' }}
             onChange={handleFileSelect}
           />
@@ -174,7 +176,7 @@ export const Gallery: React.FC<GalleryProps> = ({
         ) : (
           <Grid container spacing={3} py={4}>
             {filteredProjects.map((project) => (
-              <Grid item xs={12} sm={6} md={4} lg={2.4} xl={2.4} key={project.id}>
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3, xl: 3 }} key={project.id}>
                 <Card sx={{ borderRadius: 3, boxShadow: 4, display: 'flex', flexDirection: 'column', height: '100%', minWidth: 180, maxWidth: 220, mx: 'auto' }}>
                   {/* Thumbnail */}
                   <Box sx={{ position: 'relative', aspectRatio: '16/9', bgcolor: 'grey.100', display: 'flex', alignItems: 'center', justifyContent: 'center', borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' }}>

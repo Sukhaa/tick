@@ -26,7 +26,7 @@ function openProjectDB() {
 }
 
 export const useGallery = () => {
-  const [projects, setProjects] = useState<SavedProject[]>([]);
+  const [projects, setProjects] = useState<SavedProject[]>([]); // Now includes type and boardImages for board projects
   const [loading, setLoading] = useState(true);
 
   // Load all projects from IndexedDB
@@ -66,7 +66,8 @@ export const useGallery = () => {
     height: number,
     annotations: Annotation[],
     title: string,
-    thumbnailUrl?: string
+    thumbnailUrl?: string,
+    extra?: Partial<Pick<SavedProject, 'type' | 'boardImages'>>
   ) => {
     try {
       const db = await openProjectDB();
@@ -84,6 +85,7 @@ export const useGallery = () => {
         createdAt: now,
         updatedAt: now,
         thumbnailUrl: thumbnailUrl || '',
+        ...(extra || {}),
       };
 
       // Remove any undefined properties (defensive)
@@ -121,7 +123,7 @@ export const useGallery = () => {
   }, []);
 
   // Load a specific project
-  const loadProject = useCallback(async (projectId: string): Promise<SavedProject | null> => {
+  const loadProject = useCallback(async (projectId: string): Promise<SavedProject | null> => { // Returns full object, including type/boardImages
     try {
       const db = await openProjectDB();
       return new Promise((resolve, reject) => {

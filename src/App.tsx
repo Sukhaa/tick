@@ -8,6 +8,10 @@ import { Gallery } from './components/Gallery';
 import { exportAnnotatedImage, getExportFilename } from './utils/exportUtils';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { Box, Typography, IconButton, Tooltip, Divider } from '@mui/material';
+import BoardCanvas from './components/BoardCanvas';
+import { ProjectType, Project } from './types/annotation';
+import BoardToolbar from './components/BoardToolbar';
+import { BoardImageV2, BoardAnnotationType } from './types/annotation';
 
 // --- IndexedDB utility for image blobs ---
 const DB_NAME = 'woosh-image-db';
@@ -85,6 +89,51 @@ function App() {
   const uploadRef = useRef<HTMLDivElement>(null);
   const [exportFormat, setExportFormat] = useState<'png' | 'jpg'>('png');
   const [title, setTitle] = useState<string>('');
+  const [currentBoardImages, setCurrentBoardImages] = useState<BoardImageV2[]>([]);
+  const [isBoardProject, setIsBoardProject] = useState(false);
+  const [boardZoom, setBoardZoom] = useState(1);
+  const [boardPan, setBoardPan] = useState({ x: 0, y: 0 });
+  const [selectedBoardImageId, setSelectedBoardImageId] = useState<string | null>(null);
+
+  // Robust board annotation system state
+  const [boardImages, setBoardImages] = useState<BoardImageV2[]>([]);
+  const [boardTool, setBoardTool] = useState<BoardAnnotationType>('pointer');
+  const [boardColor, setBoardColor] = useState<string>('#1976d2');
+  // Undo/redo stacks for board annotations
+  const [boardHistory, setBoardHistory] = useState<BoardImageV2[][]>([]);
+  const [boardFuture, setBoardFuture] = useState<BoardImageV2[][]>([]);
+
+  // Board annotation handlers
+  const handleBoardUpdateImage = (id: string, updates: Partial<BoardImageV2>) => {
+    setBoardImages(imgs => imgs.map(img => img.id === id ? { ...img, ...updates } : img));
+    setBoardHistory(hist => [...hist, boardImages]);
+    setBoardFuture([]);
+  };
+  const handleBoardAnnotationChange = (id: string, annotations: BoardImageV2['annotations']) => {
+    setBoardImages(imgs => imgs.map(img => img.id === id ? { ...img, annotations } : img));
+    setBoardHistory(hist => [...hist, boardImages]);
+    setBoardFuture([]);
+  };
+  const handleBoardUndo = () => {
+    setBoardHistory(hist => {
+      if (hist.length === 0) return hist;
+      setBoardFuture(fut => [boardImages, ...fut]);
+      setBoardImages(hist[hist.length - 1]);
+      return hist.slice(0, -1);
+    });
+  };
+  const handleBoardRedo = () => {
+    setBoardFuture(fut => {
+      if (fut.length === 0) return fut;
+      setBoardHistory(hist => [...hist, boardImages]);
+      setBoardImages(fut[0]);
+      return fut.slice(1);
+    });
+  };
+  const handleBoardExport = () => {
+    // TODO: Implement export logic for board (e.g., export as image or JSON)
+    alert('Export not implemented yet!');
+  };
 
   // Auto-save current project when annotations or title change
   useEffect(() => {
@@ -114,19 +163,68 @@ function App() {
     }
   }, [currentProjectId, currentImage, annotations, title, saveProject, imageLoading, projects]);
 
-  // Unified image file handler
-  const handleImageFile = async (file: File) => {
+  // Auto-save board project when images change
+  React.useEffect(() => {
+    if (isBoardProject && currentBoardImages.length > 0) {
+      const boardId = currentProjectId || `board-${Date.now()}-${Math.random()}`;
+      const boardTitle = title || `Board Project ${new Date().toLocaleDateString()}`;
+      saveProject(
+        boardId,
+        boardTitle,
+        '', // no fileName
+        '', // no imageKey
+        0, // no width
+        0, // no height
+        [], // no single-image annotations
+        boardTitle,
+        '', // no thumbnail
+        { type: 'board', boardImages: currentBoardImages }
+      );
+      setCurrentProjectId(boardId);
+      setTitle(boardTitle);
+    }
+  }, [isBoardProject, currentBoardImages]);
+
+  // Unified image file handler (updated for board projects)
+  const handleImageFile = async (fileOrFiles: File | FileList) => {
+    const files = fileOrFiles instanceof FileList ? fileOrFiles : [fileOrFiles];
+    if (files.length > 1) {
+      // Board project: multiple images (new robust model)
+      const boardImages: BoardImageV2[] = [];
+      let gridCols = Math.ceil(Math.sqrt(files.length));
+      const imgSize = 320;
+      let idx = 0;
+      for (const file of Array.from(files)) {
+        const boardImageId = `img-${Date.now()}-${idx}`;
+        await saveImageBlob(boardImageId, file);
+        const url = URL.createObjectURL(file);
+        boardImages.push({
+          id: boardImageId,
+          url,
+          fileName: file.name,
+          x: (idx % gridCols) * (imgSize + 32) + 80,
+          y: Math.floor(idx / gridCols) * (imgSize + 32) + 80,
+          width: imgSize,
+          height: imgSize,
+          annotations: [], // BoardAnnotation[]
+        });
+        idx++;
+      }
+      setBoardImages(boardImages);
+      setSelectedBoardImageId(boardImages[0]?.id || null);
+      setShowGallery(false);
+      return;
+    }
+    // Single image (existing flow)
+    const file = files[0];
     if (file && file.type.startsWith('image/')) {
       setImageLoading(true);
       setImageError(null);
-      
       try {
         const imageKey = `image-${Date.now()}-${Math.random()}`;
         await saveImageBlob(imageKey, file);
-        
         const img = new window.Image();
         img.onload = async () => {
-          // Only store serializable data in project
           const imageData: ImageData = {
             id: imageKey,
             fileName: file.name,
@@ -134,15 +232,11 @@ function App() {
             height: img.height,
             annotations: [],
           };
-          
-          // Generate thumbnail
           const thumbnailUrl = await generateThumbnail(file);
-          
-          // Create new project
           const projectId = `project-${Date.now()}-${Math.random()}`;
           await saveProject(
             projectId,
-            '', // Start with empty name, will be set by title
+            '',
             file.name,
             imageKey,
             img.width,
@@ -151,10 +245,7 @@ function App() {
             '',
             thumbnailUrl
           );
-          
-          // Reconstruct URL for use in app state only
           const url = URL.createObjectURL(file);
-          // Set a default title
           const defaultTitle = `Untitled Project ${new Date().toLocaleDateString()}`;
           setCurrentImage({ ...imageData, url });
           setCurrentProjectId(projectId);
@@ -163,12 +254,10 @@ function App() {
           setShowGallery(false);
           setImageLoading(false);
         };
-        
         img.onerror = () => {
           setImageError('Failed to load the selected image.');
           setImageLoading(false);
         };
-        
         img.src = URL.createObjectURL(file);
       } catch (error) {
         setImageError('Failed to save image to storage.');
@@ -199,18 +288,31 @@ function App() {
   }, [currentImage]);
 
   // Gallery handlers
-  const handleSelectProject = async (project: SavedProject) => {
+  const handleSelectProject = async (project: any) => {
     setImageLoading(true);
     setImageError(null);
-    
     try {
-      // Load image blob
+      // Check for board project (type or boardImages)
+      if (project.type === 'board' || project.boardImages) {
+        // Board project: rehydrate image URLs (new robust model)
+        const boardImages: BoardImageV2[] = await Promise.all((project.boardImages || []).map(async (img: any) => {
+          let blob: Blob | null = null;
+          if (img.id) blob = await getImageBlob(img.id);
+          if (!blob && img.fileName) blob = await getImageBlob(img.fileName);
+          let url = '';
+          if (blob !== null) url = URL.createObjectURL(blob);
+          return { ...img, url };
+        }));
+        setBoardImages(boardImages);
+        setSelectedBoardImageId(boardImages[0]?.id || null);
+        setShowGallery(false);
+        return;
+      }
+      // Single-image project (default)
       const blob = await getImageBlob(project.imageKey);
       if (!blob) {
         throw new Error('Image not found');
       }
-      
-      // Reconstruct URL for use in app state only
       const url = URL.createObjectURL(blob);
       const imageData: RuntimeImageData = {
         id: project.imageKey,
@@ -218,16 +320,15 @@ function App() {
         width: project.width,
         height: project.height,
         annotations: project.annotations,
-        url, // Only for runtime use
+        url,
       };
-      
       setCurrentImage(imageData);
       setCurrentProjectId(project.id);
       setTitle(project.title);
-      // Load annotations into the hook
       clearAnnotations();
       project.annotations.forEach(ann => addAnnotation(ann));
       setShowGallery(false);
+      setIsBoardProject(false);
       setImageLoading(false);
     } catch (error) {
       setImageError('Failed to load project.');
@@ -345,42 +446,38 @@ function App() {
             onUploadNew={handleImageFile}
             onExportProject={handleExportProject}
           />
-        ) : (
-          <Box sx={{ width: '100%', maxWidth: '100vw', mx: 'auto', pt: 2 }}>
-            {/* Remove header row and spacers, move back button into AnnotationCanvas */}
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              {currentImage && (
-                <AnnotationCanvas
-                  imageUrl={currentImage.url}
-                  imageWidth={currentImage.width}
-                  imageHeight={currentImage.height}
-                  tool={selectedTool}
-                  color={color}
-                  annotations={annotations}
-                  onAddAnnotation={addAnnotation}
-                  onUpdateAnnotation={updateAnnotation}
-                  onDeleteAnnotation={deleteAnnotation}
-                  selectedId={selectedId}
-                  onSelectAnnotation={handleSelectAnnotation}
-                  expandCanvas={true}
-                  connectorColor={color}
-                  connectorStyle={connectorStyle}
-                  connectorThickness={connectorThickness}
-                  showLabelNumbers={true}
-                  title={title}
-                  onUpdateTitle={handleUpdateTitle}
-                  svgRef={svgRef}
-                  containerRef={containerRef}
-                  autoFocusTitle={title.startsWith('Untitled Project') || !title}
-                  onBack={handleBackToGallery} // Pass back button handler
-                />
-              )}
-            </Box>
-          </Box>
-        )}
+        ) : boardImages.length > 0 ? (
+          <>
+            {!showGallery && (
+              <Box sx={{ position: 'absolute', top: 16, left: 16, zIndex: 100 }}>
+                <IconButton color="primary" onClick={() => setShowGallery(true)}>
+                  <ArrowBackIcon />
+                </IconButton>
+              </Box>
+            )}
+            <BoardCanvas
+              images={boardImages}
+              onUpdateImage={handleBoardUpdateImage}
+              onAnnotationChange={handleBoardAnnotationChange}
+              selectedImageId={selectedBoardImageId}
+              onSelectImage={setSelectedBoardImageId}
+              tool={boardTool}
+              color={boardColor}
+            />
+            <BoardToolbar
+              selectedTool={boardTool}
+              onSelectTool={setBoardTool}
+              color={boardColor}
+              onColorChange={setBoardColor}
+              onUndo={handleBoardUndo}
+              onRedo={handleBoardRedo}
+              onExport={handleBoardExport}
+            />
+          </>
+        ) : null}
       </Box>
       {/* Fixed bottom toolbar, only when image is loaded */}
-      {currentImage && (
+      {(currentImage || isBoardProject) && (
         <Box sx={{ width: '100%', maxWidth: '100vw', px: 4, pb: 4, position: 'fixed', bottom: 0, left: 0, zIndex: 10 }}>
           <Toolbar
             selectedTool={selectedTool}
